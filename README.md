@@ -30,24 +30,23 @@ EventHub/
 ├── app.py                  # Main application file
 ├── config.py               # Configuration settings
 ├── requirements.txt        # Python dependencies
-├── schema.sql              # Database schema
+├── render.yaml             # Render deployment config
 ├── create_admin_users.py   # Admin user creation script
 ├── clean_data.py           # Database cleanup utility
 ├── migrations/             # Database migration files
 ├── static/                 # Static assets (CSS, JS)
 ├── templates/              # HTML templates
-└── .env                    # Environment variables
+└── .env                    # Environment variables (local only)
 ```
 
 ## Getting Started
 
 ### Prerequisites
 - Python 3.8 or higher
-- MySQL 8.0 or higher
 - pip (Python package manager)
 - Git
 
-### Installation
+### Local Setup
 
 1. **Clone the repository**
    ```bash
@@ -82,17 +81,11 @@ EventHub/
    FLASK_APP=app.py
    FLASK_ENV=development
    SECRET_KEY=your-secret-key-here
-   DATABASE_URL=mysql+mysqlconnector://root:yourpassword@localhost/eventhub
    ```
 
-5. **Set up the database**
+   > No database URL needed — SQLite is used by default locally.
 
-   Create the database in MySQL:
-   ```sql
-   CREATE DATABASE eventhub;
-   ```
-
-   Run migrations:
+5. **Run migrations**
    ```bash
    flask db upgrade
    ```
@@ -117,9 +110,28 @@ EventHub/
 
    Open your browser at `http://127.0.0.1:5000`
 
-## Database Schema
+## Deploying to Render
 
-EventHub uses a relational MySQL database with the following tables:
+1. Push your code to GitHub
+
+2. Go to [render.com](https://render.com) and create a new **Web Service**
+
+3. Connect your GitHub repository
+
+4. Render will auto-detect `render.yaml` and configure:
+   - **Build Command**: `pip install -r requirements.txt && flask db upgrade && python create_admin_users.py`
+   - **Start Command**: `gunicorn app:app`
+
+5. Add environment variables in Render dashboard:
+   - `SECRET_KEY` — any long random string
+   - `FLASK_APP` — `app.py`
+   - `FLASK_ENV` — `production`
+
+6. Click **Deploy** — your app will be live!
+
+> **Note**: Render's free tier uses ephemeral storage, so the SQLite database resets on redeploy. For persistent data, use [Render PostgreSQL](https://render.com/docs/databases) or [PlanetScale](https://planetscale.com) and set `DATABASE_URL` accordingly.
+
+## Database Schema
 
 | Table | Description |
 |-------|-------------|
@@ -148,7 +160,9 @@ python clean_data.py
 ## Tech Stack
 
 - **Backend**: Python, Flask
-- **Database**: MySQL, SQLAlchemy, Flask-Migrate
+- **Database**: SQLite (local) / PostgreSQL (production)
+- **ORM**: SQLAlchemy, Flask-Migrate
 - **Frontend**: HTML, CSS, JavaScript
 - **Auth**: bcrypt password hashing
+- **Server**: Gunicorn (production)
 - **Config**: python-dotenv

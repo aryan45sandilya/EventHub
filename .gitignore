@@ -24,6 +24,7 @@ flask_session/
 *.db
 *.sqlite
 *.sqlite3
+eventhub.db
 
 # Migrations (keep the folder but ignore pycache)
 migrations/__pycache__/

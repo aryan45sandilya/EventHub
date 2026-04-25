@@ -15,7 +15,10 @@ load_dotenv()
 # Initialize Flask app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'default_secret_key')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'mysql+mysqlconnector://root:password@localhost/eventhub')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
+    'DATABASE_URL',
+    'sqlite:///' + os.path.join(os.path.abspath(os.path.dirname(__file__)), 'eventhub.db')
+)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialize SQLAlchemy
@@ -145,6 +148,8 @@ def hash_password(password):
 
 def check_password(hashed_password, user_password):
     """Checks if the provided password matches the hashed password."""
+    if isinstance(hashed_password, str):
+        hashed_password = hashed_password.encode('utf-8')
     return bcrypt.checkpw(user_password.encode('utf-8'), hashed_password)
 
 # --- Decorators ---
@@ -219,7 +224,7 @@ def login():
         password = request.form['password']
         user = User.query.filter_by(email=email).first()
 
-        if user and check_password(user.password.encode('utf-8'), password):
+        if user and check_password(user.password, password):
             session['user_id'] = user.user_id
             session['user_name'] = user.name
             session['user_role'] = user.user_type
