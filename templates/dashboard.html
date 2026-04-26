@@ -32,7 +32,7 @@
                 {% for event in events %}
                 <tr>
                     <td><a href="{{ url_for('event_details', event_id=event.event_id) }}" style="color:var(--primary);font-weight:600;">{{ event.name }}</a></td>
-                    <td style="font-size:.82rem;">{{ event.date.strftime('%b %d, %Y') }}</td>
+                    <td style="font-size:.82rem;">{{ event.date.strftime('%b %d, %Y') if event.date else 'N/A' }}</td>
                     <td style="font-size:.82rem;">{{ event.venue.name if event.venue else '—' }}</td>
                     <td class="text-right actions">
                         <a href="{{ url_for('edit_event', event_id=event.event_id) }}" class="btn btn-sm btn-secondary">Edit</a>
@@ -117,7 +117,7 @@
                 <tr>
                     <td style="font-weight:600;">#{{ order.order_id }}</td>
                     <td style="font-size:.82rem;">{{ order.date.strftime('%b %d, %Y') }}</td>
-                    <td style="font-size:.82rem;">{{ order.user.name }}</td>
+                    <td style="font-size:.82rem;">{{ order.user.name if order.user else 'N/A' }}</td>
                     <td style="font-weight:700;color:var(--success);">&#8377;{{ "%.2f"|format(order.total_price) }}</td>
                 </tr>
                 {% else %}
