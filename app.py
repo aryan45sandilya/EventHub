@@ -482,20 +482,18 @@ def logout():
 def dashboard():
     """Organizer dashboard."""
     try:
-        # Force fresh query - expire any cached data
-        db.session.expire_all()
+        # NUCLEAR OPTION: Close and reopen connection
+        db.session.close()
+        db.session.remove()
         
-        # Fetch data with minimal queries - no complex joins
+        # Fresh queries
         events = Event.query.order_by(Event.date.asc()).all()
         venues = Venue.query.all()
         speakers = Speaker.query.all()
         tickets = Ticket.query.all()
         orders = Order.query.order_by(Order.date.desc()).all()
 
-        # Debug logging
         app.logger.info(f"Dashboard loaded - Events: {len(events)}, Venues: {len(venues)}")
-        for event in events:
-            app.logger.info(f"  Event: {event.name} (ID: {event.event_id}, Date: {event.date})")
 
         return render_template('dashboard.html',
                                events=events,
@@ -505,7 +503,6 @@ def dashboard():
                                orders=orders)
     except Exception as e:
         app.logger.error(f"Dashboard error: {str(e)}", exc_info=True)
-        # Return empty dashboard instead of error
         return render_template('dashboard.html',
                                events=[],
                                venues=[],
