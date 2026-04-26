@@ -399,16 +399,16 @@ def logout():
 def dashboard():
     """Organizer dashboard."""
     try:
-        # Ensure database tables exist
-        db.create_all()
-        
         # Fetch data relevant to the organizer with eager loading to avoid N+1 queries
         events = Event.query.options(
             db.joinedload(Event.venue)
         ).order_by(Event.date.asc()).all()
         
         venues = Venue.query.all()
-        speakers = Speaker.query.options(db.joinedload(Speaker.event)).all()
+        
+        # Don't use joinedload for Speaker.event since it's already loaded via backref
+        speakers = Speaker.query.all()
+        
         tickets = Ticket.query.all()
         
         # Eager load user relationship to prevent lazy loading issues
@@ -423,6 +423,14 @@ def dashboard():
                                tickets=tickets,
                                orders=orders)
     except Exception as e:
+        app.logger.error(f"Dashboard error: {str(e)}", exc_info=True)
+        flash('An error occurred while loading the dashboard. Please try again.', 'danger')
+        return render_template('dashboard.html',
+                               events=[],
+                               venues=[],
+                               speakers=[],
+                               tickets=[],
+                               orders=[])
         app.logger.error(f"Dashboard error: {str(e)}", exc_info=True)
         flash('An error occurred while loading the dashboard. Please try again.', 'danger')
         return render_template('dashboard.html',
@@ -1314,9 +1322,9 @@ def ai_planner():
 def reminders():
     try:
         user_id = session['user_id']
-        my_reminders = Reminder.query.options(
-            db.joinedload(Reminder.event)
-        ).filter_by(user_id=user_id).order_by(Reminder.remind_at).all()
+        
+        # Don't use joinedload for Reminder.event, use backref instead
+        my_reminders = Reminder.query.filter_by(user_id=user_id).order_by(Reminder.remind_at).all()
         
         # Get events the user has tickets for
         booked_event_ids = db.session.query(Ticket.event_id).join(Order).filter(Order.user_id == user_id).distinct().all()
