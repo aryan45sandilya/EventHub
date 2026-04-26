@@ -333,6 +333,61 @@ def debug_dashboard():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/init-database', methods=['GET', 'POST'])
+@login_required(role="administrator")
+def init_database():
+    """Initialize database with sample data - Admin only"""
+    from flask import jsonify
+    try:
+        # Check if already initialized
+        if Venue.query.count() > 0:
+            return jsonify({
+                'status': 'already_initialized',
+                'message': 'Database already has data',
+                'counts': {
+                    'venues': Venue.query.count(),
+                    'events': Event.query.count()
+                }
+            })
+        
+        # Create sample venues
+        venues = [
+            Venue(name='Grand Convention Center', address='123 Main Street', city='Delhi', state='Delhi', zip_code='110001', capacity=500),
+            Venue(name='Tech Park Auditorium', address='456 Tech Road', city='Bangalore', state='Karnataka', zip_code='560001', capacity=300),
+            Venue(name='Beachside Resort', address='789 Beach Road', city='Mumbai', state='Maharashtra', zip_code='400001', capacity=200)
+        ]
+        
+        for venue in venues:
+            db.session.add(venue)
+        
+        db.session.commit()
+        
+        # Create sample event
+        venue = Venue.query.first()
+        event = Event(
+            name='Welcome Event - EventHub Launch',
+            description='Join us for the grand launch of EventHub platform!',
+            date=datetime.date.today() + datetime.timedelta(days=7),
+            time=datetime.time(18, 0),
+            location_id=venue.venue_id
+        )
+        
+        db.session.add(event)
+        db.session.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Database initialized successfully!',
+            'counts': {
+                'venues': Venue.query.count(),
+                'events': Event.query.count()
+            }
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @app.route('/events')
 def list_events():
     """Page displaying all events."""
