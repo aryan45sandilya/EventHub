@@ -24,6 +24,25 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.jinja_env.auto_reload = True
 app.jinja_env.bytecode_cache = None
 
+# Configure logging for production
+if not app.debug:
+    import logging
+    from logging.handlers import RotatingFileHandler
+    
+    # Create logs directory if it doesn't exist
+    if not os.path.exists('logs'):
+        os.mkdir('logs')
+    
+    file_handler = RotatingFileHandler('logs/eventhub.log', maxBytes=10240, backupCount=10)
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+    ))
+    file_handler.setLevel(logging.INFO)
+    app.logger.addHandler(file_handler)
+    
+    app.logger.setLevel(logging.INFO)
+    app.logger.info('EventHub startup')
+
 # Force no-cache on all responses so browser never serves stale pages
 @app.after_request
 def add_no_cache_headers(response):
@@ -42,6 +61,20 @@ migrate = Migrate(app, db)
 @app.context_processor
 def inject_now():
     return {'now': datetime.datetime.now()}
+
+# Global error handlers
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle internal server errors."""
+    db.session.rollback()
+    app.logger.error(f'Server Error: {error}', exc_info=True)
+    flash('An internal error occurred. Please try again later.', 'danger')
+    return render_template('index.html'), 500
+
+@app.errorhandler(404)
+def not_found_error(error):
+    """Handle 404 errors."""
+    return render_template('index.html'), 404
 
 # --- Database Models ---
 class User(db.Model):
@@ -241,6 +274,26 @@ def index():
     events = Event.query.order_by(Event.date.asc()).limit(6).all() # Show upcoming events
     return render_template('index.html', events=events)
 
+@app.route('/health')
+def health_check():
+    """Health check endpoint for monitoring."""
+    from flask import jsonify
+    try:
+        # Test database connection
+        db.session.execute(db.text('SELECT 1'))
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'timestamp': datetime.datetime.now().isoformat()
+        }), 200
+    except Exception as e:
+        app.logger.error(f"Health check failed: {str(e)}")
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.datetime.now().isoformat()
+        }), 500
+
 @app.route('/events')
 def list_events():
     """Page displaying all events."""
@@ -334,20 +387,39 @@ def logout():
 @organizer_required
 def dashboard():
     """Organizer dashboard."""
-    # Fetch data relevant to the organizer (e.g., their events)
-    # For now, just show all events as an example
-    events = Event.query.order_by(Event.date.asc()).all()
-    venues = Venue.query.all()
-    speakers = Speaker.query.all()
-    tickets = Ticket.query.all() # Be cautious with large datasets
-    orders = Order.query.all()   # Be cautious with large datasets
+    try:
+        # Ensure database tables exist
+        db.create_all()
+        
+        # Fetch data relevant to the organizer with eager loading to avoid N+1 queries
+        events = Event.query.options(
+            db.joinedload(Event.venue)
+        ).order_by(Event.date.asc()).all()
+        
+        venues = Venue.query.all()
+        speakers = Speaker.query.options(db.joinedload(Speaker.event)).all()
+        tickets = Ticket.query.all()
+        
+        # Eager load user relationship to prevent lazy loading issues
+        orders = Order.query.options(
+            db.joinedload(Order.user)
+        ).order_by(Order.date.desc()).all()
 
-    return render_template('dashboard.html',
-                           events=events,
-                           venues=venues,
-                           speakers=speakers,
-                           tickets=tickets,
-                           orders=orders)
+        return render_template('dashboard.html',
+                               events=events,
+                               venues=venues,
+                               speakers=speakers,
+                               tickets=tickets,
+                               orders=orders)
+    except Exception as e:
+        app.logger.error(f"Dashboard error: {str(e)}", exc_info=True)
+        flash('An error occurred while loading the dashboard. Please try again.', 'danger')
+        return render_template('dashboard.html',
+                               events=[],
+                               venues=[],
+                               speakers=[],
+                               tickets=[],
+                               orders=[])
 
 
 # --- CRUD Operations for Events (Organizer Only) ---
@@ -621,10 +693,18 @@ def manage_event_tickets(event_id):
 @login_required(role="organizer")
 def view_event_tickets(event_id):
     """View all tickets for an event (organizers and admins only)"""
-    event = Event.query.get_or_404(event_id)
-    # Get all tickets for this event with user and order information
-    tickets = Ticket.query.join(Order).join(User).filter(Ticket.event_id == event_id).all()
-    return render_template('event_tickets.html', event=event, tickets=tickets)
+    try:
+        event = Event.query.get_or_404(event_id)
+        # Get all tickets for this event with user and order information eagerly loaded
+        tickets = Ticket.query.options(
+            db.joinedload(Ticket.order).joinedload(Order.user),
+            db.joinedload(Ticket.event)
+        ).filter(Ticket.event_id == event_id).all()
+        return render_template('event_tickets.html', event=event, tickets=tickets)
+    except Exception as e:
+        app.logger.error(f"View event tickets error: {str(e)}", exc_info=True)
+        flash('An error occurred while loading tickets.', 'danger')
+        return redirect(url_for('dashboard'))
 
 @app.route('/tickets/<int:ticket_id>/delete', methods=['POST'])
 @login_required(role="organizer")
@@ -783,10 +863,18 @@ def book_ticket(event_id):
 @login_required(role="attendee")
 def my_tickets():
      """Displays tickets booked by the current attendee."""
-     user_id = session['user_id']
-     # Fetch orders and associated tickets for the user
-     orders = Order.query.filter_by(user_id=user_id).options(db.joinedload(Order.tickets).joinedload(Ticket.event)).order_by(Order.date.desc()).all()
-     return render_template('my_tickets.html', orders=orders)
+     try:
+         user_id = session['user_id']
+         # Fetch orders with all necessary relationships eagerly loaded
+         orders = Order.query.filter_by(user_id=user_id).options(
+             db.joinedload(Order.tickets).joinedload(Ticket.event).joinedload(Event.venue),
+             db.joinedload(Order.payment)
+         ).order_by(Order.date.desc()).all()
+         return render_template('my_tickets.html', orders=orders)
+     except Exception as e:
+         app.logger.error(f"My tickets error: {str(e)}", exc_info=True)
+         flash('An error occurred while loading your tickets. Please try again.', 'danger')
+         return render_template('my_tickets.html', orders=[])
 
 @app.route('/orders/<int:order_id>/pay', methods=['POST'])
 @login_required(role="attendee")
@@ -865,190 +953,235 @@ def delete_organizer(user_id):
 @login_required(role="attendee")
 def digital_pass(ticket_id):
     """Show the digital pass with QR code for a ticket."""
-    ticket = Ticket.query.get_or_404(ticket_id)
-    if ticket.order.user_id != session['user_id']:
-        flash('Access denied.', 'danger')
+    try:
+        ticket = Ticket.query.options(
+            db.joinedload(Ticket.order).joinedload(Order.user),
+            db.joinedload(Ticket.event).joinedload(Event.venue)
+        ).get_or_404(ticket_id)
+        
+        if ticket.order.user_id != session['user_id']:
+            flash('Access denied.', 'danger')
+            return redirect(url_for('my_tickets'))
+        
+        if not ticket.qr_token:
+            import uuid as _uuid
+            ticket.qr_token = _uuid.uuid4().hex
+            db.session.commit()
+        
+        if not ticket.short_code:
+            ticket.short_code = generate_short_code()
+            db.session.commit()
+        
+        qr_data = request.host_url.rstrip('/') + url_for('verify_ticket', token=ticket.qr_token)
+        qr_b64  = generate_qr_image(qr_data)
+        return render_template('digital_pass.html', ticket=ticket, qr_b64=qr_b64, qr_data=qr_data)
+    except Exception as e:
+        app.logger.error(f"Digital pass error: {str(e)}", exc_info=True)
+        flash('An error occurred while loading your pass.', 'danger')
         return redirect(url_for('my_tickets'))
-    if not ticket.qr_token:
-        import uuid as _uuid
-        ticket.qr_token = _uuid.uuid4().hex
-        db.session.commit()
-    if not ticket.short_code:
-        ticket.short_code = generate_short_code()
-        db.session.commit()
-    qr_data = request.host_url.rstrip('/') + url_for('verify_ticket', token=ticket.qr_token)
-    qr_b64  = generate_qr_image(qr_data)
-    return render_template('digital_pass.html', ticket=ticket, qr_b64=qr_b64, qr_data=qr_data)
 
 
 @app.route('/tickets/<int:ticket_id>/pass/download')
 @login_required(role="attendee")
 def download_pass(ticket_id):
     """Generate and serve the pass as a downloadable PNG image."""
-    from flask import send_file
-    import io, qrcode
-    from PIL import Image, ImageDraw, ImageFont
+    try:
+        from flask import send_file
+        import io, qrcode
+        from PIL import Image, ImageDraw, ImageFont
 
-    ticket = Ticket.query.get_or_404(ticket_id)
-    if ticket.order.user_id != session['user_id']:
-        flash('Access denied.', 'danger')
+        ticket = Ticket.query.options(
+            db.joinedload(Ticket.order).joinedload(Order.user),
+            db.joinedload(Ticket.event).joinedload(Event.venue)
+        ).get_or_404(ticket_id)
+        
+        if ticket.order.user_id != session['user_id']:
+            flash('Access denied.', 'danger')
+            return redirect(url_for('my_tickets'))
+
+        # ── Constants ──
+        W, H    = 800, 1000
+        PURPLE  = (108, 99, 255)
+        DARK    = (26,  16,  64)
+        DARKER  = (13,  11,  30)
+        WHITE   = (255, 255, 255)
+        MUTED   = (136, 146, 170)
+        GREEN   = (34,  197,  94)
+        LAVENDER= (167, 139, 250)
+        PINK    = (236,  72, 153)
+
+        # ── Fonts (absolute paths — fast, no search) ──
+        BASE = 'C:/Windows/Fonts/'
+        def fnt(name, size):
+            try:    return ImageFont.truetype(BASE + name, size)
+            except: return ImageFont.load_default()
+
+        f_title  = fnt('arialbd.ttf', 36)
+        f_med    = fnt('arial.ttf',   24)
+        f_sm     = fnt('arial.ttf',   18)
+        f_xs     = fnt('arial.ttf',   14)
+        f_mono   = fnt('consola.ttf', 44)
+        f_mono_s = fnt('consola.ttf', 16)
+
+        # ── Canvas ──
+        img  = Image.new('RGB', (W, H), DARKER)
+        draw = ImageDraw.Draw(img)
+
+        # ── Header — single gradient using two rectangles blended ──
+        header_h = 200
+        grad = Image.new('RGB', (W, header_h))
+        gd   = ImageDraw.Draw(grad)
+        for x in range(W):
+            t = x / W
+            r = int(108 + (236-108)*t)
+            g = int(99  + (72 -99 )*t)
+            b = int(255 + (153-255)*t)
+            gd.line([(x,0),(x,header_h)], fill=(r,g,b))
+        img.paste(grad, (0, 0))
+
+        # ── Header text ──
+        draw.text((36, 22),  "DIGITAL EVENT PASS", font=f_xs, fill=(255,255,255,180))
+        name = ticket.event.name[:38]
+        draw.text((36, 44),  name, font=f_title, fill=WHITE)
+        date_str = ticket.event.date.strftime('%A, %B %d, %Y')
+        if ticket.event.start_time:
+            date_str += '  ·  ' + ticket.event.start_time.strftime('%I:%M %p')
+        draw.text((36, 96),  date_str, font=f_sm, fill=(255,255,255,200))
+        draw.text((36, 128), f"{ticket.event.venue.name}, {ticket.event.venue.city}", font=f_sm, fill=(255,255,255,160))
+
+        # ── Dashed separator ──
+        y_sep = header_h + 10
+        for x in range(0, W, 18):
+            draw.rectangle([(x, y_sep), (x+9, y_sep+2)], fill=(80,70,120))
+
+        # ── Details grid ──
+        fields = [
+            ("ATTENDEE",    ticket.order.user.name[:28]),
+            ("TICKET TYPE", ticket.type.title()),
+            ("TICKET ID",   f"#{ticket.ticket_id:06d}"),
+            ("PRICE PAID",  f"Rs. {float(ticket.price):.2f}"),
+        ]
+        col_w = W // 2
+        for idx, (label, value) in enumerate(fields):
+            col = idx % 2
+            row = idx // 2
+            x = 36 + col * col_w
+            y = y_sep + 20 + row * 72
+            draw.text((x, y),      label, font=f_xs,  fill=MUTED)
+            draw.text((x, y + 20), value, font=f_med,  fill=WHITE)
+
+        # ── QR Code ──
+        qr_data = request.host_url.rstrip('/') + url_for('verify_ticket', token=ticket.qr_token)
+        qr = qrcode.QRCode(version=2, error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=7, border=2)
+        qr.add_data(qr_data)
+        qr.make(fit=True)
+        qr_img  = qr.make_image(fill_color="black", back_color="white").convert('RGB')
+        qr_size = 220
+        qr_img  = qr_img.resize((qr_size, qr_size), Image.NEAREST)
+
+        qr_x = (W - qr_size) // 2
+        qr_y = y_sep + 20 + 2*72 + 20
+        # White bg for QR
+        draw.rounded_rectangle([(qr_x-14, qr_y-14), (qr_x+qr_size+14, qr_y+qr_size+14)], radius=14, fill=WHITE)
+        img.paste(qr_img, (qr_x, qr_y))
+        draw.text((W//2, qr_y+qr_size+22), "Scan at entry gate", font=f_sm, fill=MUTED, anchor="mm")
+
+        # ── Short code box ──
+        sc_y  = qr_y + qr_size + 52
+        bw, bh = 360, 90
+        bx    = (W - bw) // 2
+        draw.rounded_rectangle([(bx, sc_y), (bx+bw, sc_y+bh)], radius=12, fill=(40,30,80), outline=PURPLE, width=2)
+        draw.text((W//2, sc_y+14), "MANUAL ENTRY CODE", font=f_xs,   fill=MUTED,    anchor="mm")
+        draw.text((W//2, sc_y+42), ticket.short_code or 'EVT-????',  font=f_mono,   fill=LAVENDER, anchor="mm")
+        draw.text((W//2, sc_y+74), "Type at gate if QR doesn't scan", font=f_mono_s, fill=MUTED,   anchor="mm")
+
+        # ── Status ──
+        st_y = sc_y + bh + 22
+        if ticket.checked_in:
+            draw.rounded_rectangle([(W//2-70, st_y), (W//2+70, st_y+32)], radius=16, fill=(20,60,30), outline=GREEN, width=2)
+            draw.text((W//2, st_y+16), "CHECKED IN", font=f_sm, fill=GREEN, anchor="mm")
+        else:
+            draw.rounded_rectangle([(W//2-50, st_y), (W//2+50, st_y+32)], radius=16, fill=(40,30,80), outline=PURPLE, width=2)
+            draw.text((W//2, st_y+16), "VALID", font=f_sm, fill=LAVENDER, anchor="mm")
+
+        # ── Footer ──
+        draw.rectangle([(0, H-44), (W, H)], fill=DARK)
+        draw.text((36, H-28),   "EventHub · Digital Pass", font=f_xs, fill=MUTED)
+        draw.text((W-36, H-28), "eventhub.com",            font=f_xs, fill=MUTED, anchor="ra")
+
+        # ── Serve ──
+        buf = io.BytesIO()
+        img.save(buf, format='PNG', optimize=True)
+        buf.seek(0)
+        fname = f"EventHub-Pass-{ticket.short_code or ticket.ticket_id}.png"
+        return send_file(buf, mimetype='image/png', as_attachment=True, download_name=fname)
+    except Exception as e:
+        app.logger.error(f"Download pass error: {str(e)}", exc_info=True)
+        flash('An error occurred while generating your pass. Please try again.', 'danger')
         return redirect(url_for('my_tickets'))
-
-    # ── Constants ──
-    W, H    = 800, 1000
-    PURPLE  = (108, 99, 255)
-    DARK    = (26,  16,  64)
-    DARKER  = (13,  11,  30)
-    WHITE   = (255, 255, 255)
-    MUTED   = (136, 146, 170)
-    GREEN   = (34,  197,  94)
-    LAVENDER= (167, 139, 250)
-    PINK    = (236,  72, 153)
-
-    # ── Fonts (absolute paths — fast, no search) ──
-    BASE = 'C:/Windows/Fonts/'
-    def fnt(name, size):
-        try:    return ImageFont.truetype(BASE + name, size)
-        except: return ImageFont.load_default()
-
-    f_title  = fnt('arialbd.ttf', 36)
-    f_med    = fnt('arial.ttf',   24)
-    f_sm     = fnt('arial.ttf',   18)
-    f_xs     = fnt('arial.ttf',   14)
-    f_mono   = fnt('consola.ttf', 44)
-    f_mono_s = fnt('consola.ttf', 16)
-
-    # ── Canvas ──
-    img  = Image.new('RGB', (W, H), DARKER)
-    draw = ImageDraw.Draw(img)
-
-    # ── Header — single gradient using two rectangles blended ──
-    header_h = 200
-    grad = Image.new('RGB', (W, header_h))
-    gd   = ImageDraw.Draw(grad)
-    for x in range(W):
-        t = x / W
-        r = int(108 + (236-108)*t)
-        g = int(99  + (72 -99 )*t)
-        b = int(255 + (153-255)*t)
-        gd.line([(x,0),(x,header_h)], fill=(r,g,b))
-    img.paste(grad, (0, 0))
-
-    # ── Header text ──
-    draw.text((36, 22),  "DIGITAL EVENT PASS", font=f_xs, fill=(255,255,255,180))
-    name = ticket.event.name[:38]
-    draw.text((36, 44),  name, font=f_title, fill=WHITE)
-    date_str = ticket.event.date.strftime('%A, %B %d, %Y')
-    if ticket.event.start_time:
-        date_str += '  ·  ' + ticket.event.start_time.strftime('%I:%M %p')
-    draw.text((36, 96),  date_str, font=f_sm, fill=(255,255,255,200))
-    draw.text((36, 128), f"{ticket.event.venue.name}, {ticket.event.venue.city}", font=f_sm, fill=(255,255,255,160))
-
-    # ── Dashed separator ──
-    y_sep = header_h + 10
-    for x in range(0, W, 18):
-        draw.rectangle([(x, y_sep), (x+9, y_sep+2)], fill=(80,70,120))
-
-    # ── Details grid ──
-    fields = [
-        ("ATTENDEE",    ticket.order.user.name[:28]),
-        ("TICKET TYPE", ticket.type.title()),
-        ("TICKET ID",   f"#{ticket.ticket_id:06d}"),
-        ("PRICE PAID",  f"Rs. {float(ticket.price):.2f}"),
-    ]
-    col_w = W // 2
-    for idx, (label, value) in enumerate(fields):
-        col = idx % 2
-        row = idx // 2
-        x = 36 + col * col_w
-        y = y_sep + 20 + row * 72
-        draw.text((x, y),      label, font=f_xs,  fill=MUTED)
-        draw.text((x, y + 20), value, font=f_med,  fill=WHITE)
-
-    # ── QR Code ──
-    qr_data = request.host_url.rstrip('/') + url_for('verify_ticket', token=ticket.qr_token)
-    qr = qrcode.QRCode(version=2, error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=7, border=2)
-    qr.add_data(qr_data)
-    qr.make(fit=True)
-    qr_img  = qr.make_image(fill_color="black", back_color="white").convert('RGB')
-    qr_size = 220
-    qr_img  = qr_img.resize((qr_size, qr_size), Image.NEAREST)
-
-    qr_x = (W - qr_size) // 2
-    qr_y = y_sep + 20 + 2*72 + 20
-    # White bg for QR
-    draw.rounded_rectangle([(qr_x-14, qr_y-14), (qr_x+qr_size+14, qr_y+qr_size+14)], radius=14, fill=WHITE)
-    img.paste(qr_img, (qr_x, qr_y))
-    draw.text((W//2, qr_y+qr_size+22), "Scan at entry gate", font=f_sm, fill=MUTED, anchor="mm")
-
-    # ── Short code box ──
-    sc_y  = qr_y + qr_size + 52
-    bw, bh = 360, 90
-    bx    = (W - bw) // 2
-    draw.rounded_rectangle([(bx, sc_y), (bx+bw, sc_y+bh)], radius=12, fill=(40,30,80), outline=PURPLE, width=2)
-    draw.text((W//2, sc_y+14), "MANUAL ENTRY CODE", font=f_xs,   fill=MUTED,    anchor="mm")
-    draw.text((W//2, sc_y+42), ticket.short_code or 'EVT-????',  font=f_mono,   fill=LAVENDER, anchor="mm")
-    draw.text((W//2, sc_y+74), "Type at gate if QR doesn't scan", font=f_mono_s, fill=MUTED,   anchor="mm")
-
-    # ── Status ──
-    st_y = sc_y + bh + 22
-    if ticket.checked_in:
-        draw.rounded_rectangle([(W//2-70, st_y), (W//2+70, st_y+32)], radius=16, fill=(20,60,30), outline=GREEN, width=2)
-        draw.text((W//2, st_y+16), "CHECKED IN", font=f_sm, fill=GREEN, anchor="mm")
-    else:
-        draw.rounded_rectangle([(W//2-50, st_y), (W//2+50, st_y+32)], radius=16, fill=(40,30,80), outline=PURPLE, width=2)
-        draw.text((W//2, st_y+16), "VALID", font=f_sm, fill=LAVENDER, anchor="mm")
-
-    # ── Footer ──
-    draw.rectangle([(0, H-44), (W, H)], fill=DARK)
-    draw.text((36, H-28),   "EventHub · Digital Pass", font=f_xs, fill=MUTED)
-    draw.text((W-36, H-28), "eventhub.com",            font=f_xs, fill=MUTED, anchor="ra")
-
-    # ── Serve ──
-    buf = io.BytesIO()
-    img.save(buf, format='PNG', optimize=True)
-    buf.seek(0)
-    fname = f"EventHub-Pass-{ticket.short_code or ticket.ticket_id}.png"
-    return send_file(buf, mimetype='image/png', as_attachment=True, download_name=fname)
 
 
 @app.route('/verify/<token>')
 def verify_ticket(token):
     """Public QR scan landing page — shows ticket info."""
-    ticket = Ticket.query.filter_by(qr_token=token).first_or_404()
-    return render_template('verify_ticket.html', ticket=ticket)
+    try:
+        ticket = Ticket.query.options(
+            db.joinedload(Ticket.order).joinedload(Order.user),
+            db.joinedload(Ticket.event).joinedload(Event.venue)
+        ).filter_by(qr_token=token).first_or_404()
+        return render_template('verify_ticket.html', ticket=ticket)
+    except Exception as e:
+        app.logger.error(f"Verify ticket error: {str(e)}", exc_info=True)
+        flash('Invalid or expired ticket.', 'danger')
+        return redirect(url_for('index'))
 
 
 @app.route('/checkin/<token>', methods=['POST'])
 @login_required(role="organizer")
 def checkin_ticket(token):
     """Organizer marks a ticket as checked-in. Accepts QR token or short code."""
-    from flask import jsonify
-    # Try QR token first, then short code
-    ticket = Ticket.query.filter_by(qr_token=token).first()
-    if not ticket:
-        ticket = Ticket.query.filter_by(short_code=token.upper()).first()
-    if not ticket:
-        return jsonify({'status': 'error', 'message': 'Invalid code — ticket not found'}), 404
-    if ticket.checked_in:
+    try:
+        from flask import jsonify
+        # Try QR token first, then short code - with eager loading
+        ticket = Ticket.query.options(
+            db.joinedload(Ticket.order).joinedload(Order.user),
+            db.joinedload(Ticket.event)
+        ).filter_by(qr_token=token).first()
+        
+        if not ticket:
+            ticket = Ticket.query.options(
+                db.joinedload(Ticket.order).joinedload(Order.user),
+                db.joinedload(Ticket.event)
+            ).filter_by(short_code=token.upper()).first()
+        
+        if not ticket:
+            return jsonify({'status': 'error', 'message': 'Invalid code — ticket not found'}), 404
+        
+        if ticket.checked_in:
+            return jsonify({
+                'status': 'already',
+                'message': f'Already checked in at {ticket.checked_in_at.strftime("%I:%M %p, %b %d")}',
+                'name': ticket.order.user.name,
+                'event': ticket.event.name,
+                'type': ticket.type
+            })
+        
+        ticket.checked_in    = True
+        ticket.checked_in_at = datetime.datetime.now()
+        db.session.commit()
+        
         return jsonify({
-            'status': 'already',
-            'message': f'Already checked in at {ticket.checked_in_at.strftime("%I:%M %p, %b %d")}',
+            'status': 'success',
+            'message': 'Check-in successful! ✅',
             'name': ticket.order.user.name,
             'event': ticket.event.name,
-            'type': ticket.type
+            'type': ticket.type,
+            'time': ticket.checked_in_at.strftime('%I:%M %p, %b %d')
         })
-    ticket.checked_in    = True
-    ticket.checked_in_at = datetime.datetime.now()
-    db.session.commit()
-    return jsonify({
-        'status': 'success',
-        'message': 'Check-in successful! ✅',
-        'name': ticket.order.user.name,
-        'event': ticket.event.name,
-        'type': ticket.type,
-        'time': ticket.checked_in_at.strftime('%I:%M %p, %b %d')
-    })
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Check-in error: {str(e)}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'An error occurred during check-in'}), 500
 
 
 @app.route('/scanner')
@@ -1141,12 +1274,21 @@ def ai_planner():
 @app.route('/reminders')
 @login_required(role="attendee")
 def reminders():
-    user_id = session['user_id']
-    my_reminders = Reminder.query.filter_by(user_id=user_id).order_by(Reminder.remind_at).all()
-    # Get events the user has tickets for
-    booked_event_ids = db.session.query(Ticket.event_id).join(Order).filter(Order.user_id == user_id).distinct().all()
-    booked_events = [Event.query.get(eid[0]) for eid in booked_event_ids if Event.query.get(eid[0])]
-    return render_template('reminders.html', reminders=my_reminders, events=booked_events)
+    try:
+        user_id = session['user_id']
+        my_reminders = Reminder.query.options(
+            db.joinedload(Reminder.event)
+        ).filter_by(user_id=user_id).order_by(Reminder.remind_at).all()
+        
+        # Get events the user has tickets for
+        booked_event_ids = db.session.query(Ticket.event_id).join(Order).filter(Order.user_id == user_id).distinct().all()
+        booked_events = [Event.query.get(eid[0]) for eid in booked_event_ids if Event.query.get(eid[0])]
+        
+        return render_template('reminders.html', reminders=my_reminders, events=booked_events)
+    except Exception as e:
+        app.logger.error(f"Reminders error: {str(e)}", exc_info=True)
+        flash('An error occurred while loading reminders.', 'danger')
+        return render_template('reminders.html', reminders=[], events=[])
 
 @app.route('/reminders/add', methods=['POST'])
 @login_required(role="attendee")
