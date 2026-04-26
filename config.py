@@ -17,7 +17,7 @@ class DevelopmentConfig(Config):
     FLASK_ENV = 'development'
     DEBUG = True
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
-        'mysql+mysqlconnector://user:password@localhost/dev_eventflow_db' # Default dev DB
+        'sqlite:///' + os.path.join(basedir, 'eventhub.db')
 
 class TestingConfig(Config):
     """Testing configuration."""
@@ -30,7 +30,9 @@ class ProductionConfig(Config):
     """Production configuration."""
     FLASK_ENV = 'production'
     DEBUG = False
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') # Must be set in production env
+    # Use SQLite for production on Render (with persistent disk)
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
+        'sqlite:///' + os.path.join(basedir, 'eventhub.db')
 
 # Dictionary to access configurations by name
 config_by_name = dict(

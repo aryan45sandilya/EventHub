@@ -2,6 +2,7 @@ services:
   - type: web
     name: eventhub
     runtime: python
+    plan: free
     buildCommand: pip install -r requirements.txt && flask db upgrade && python create_admin_users.py
     startCommand: gunicorn app:app
     envVars:
@@ -11,3 +12,10 @@ services:
         value: production
       - key: SECRET_KEY
         generateValue: true
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    # Persistent disk for SQLite database
+    disk:
+      name: eventhub-data
+      mountPath: /opt/render/project/src
+      sizeGB: 1
