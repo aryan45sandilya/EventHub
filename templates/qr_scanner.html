@@ -1,0 +1,338 @@
+{% extends "layout.html" %}
+{% block title %}QR Scanner — EventHub{% endblock %}
+{% block content %}
+
+<div class="page-hero" style="background:linear-gradient(135deg,rgba(34,197,94,0.4),rgba(59,130,246,0.35));">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:.5rem;">
+        <span style="font-size:2rem;">📷</span>
+        <h1 style="margin:0;">QR Check-in Scanner</h1>
+    </div>
+    <p>Scan attendee QR codes for instant check-in. No manual work needed.</p>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 360px;gap:2rem;align-items:start;">
+
+    <!-- Scanner -->
+    <div class="card">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+            <h2 style="font-size:1rem;">📷 Camera Scanner</h2>
+            <div id="scanStatus" style="font-size:.78rem;color:var(--muted);">Camera off</div>
+        </div>
+        <div class="card-body" style="text-align:center;">
+            <!-- Video feed -->
+            <div style="position:relative;background:#000;border-radius:12px;overflow:hidden;margin-bottom:1rem;aspect-ratio:4/3;max-height:360px;">
+                <video id="scanVideo" style="width:100%;height:100%;object-fit:cover;display:none;"></video>
+                <canvas id="scanCanvas" style="display:none;"></canvas>
+                <!-- Overlay frame -->
+                <div id="scanOverlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">
+                    <div style="width:200px;height:200px;position:relative;">
+                        <div style="position:absolute;top:0;left:0;width:40px;height:40px;border-top:3px solid #6C63FF;border-left:3px solid #6C63FF;border-radius:4px 0 0 0;"></div>
+                        <div style="position:absolute;top:0;right:0;width:40px;height:40px;border-top:3px solid #6C63FF;border-right:3px solid #6C63FF;border-radius:0 4px 0 0;"></div>
+                        <div style="position:absolute;bottom:0;left:0;width:40px;height:40px;border-bottom:3px solid #6C63FF;border-left:3px solid #6C63FF;border-radius:0 0 0 4px;"></div>
+                        <div style="position:absolute;bottom:0;right:0;width:40px;height:40px;border-bottom:3px solid #6C63FF;border-right:3px solid #6C63FF;border-radius:0 0 4px 0;"></div>
+                        <div id="scanLine" style="position:absolute;left:10px;right:10px;height:2px;background:linear-gradient(90deg,transparent,#6C63FF,transparent);top:50%;animation:scanAnim 2s ease-in-out infinite;"></div>
+                    </div>
+                </div>
+                <!-- Placeholder when camera off -->
+                <div id="cameraPlaceholder" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:rgba(255,255,255,0.4);">
+                    <div style="font-size:3rem;margin-bottom:.5rem;">📷</div>
+                    <div style="font-size:.875rem;">Click Start Scanner to begin</div>
+                </div>
+            </div>
+
+            <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;">
+                <button id="startBtn" onclick="startScanner()" class="btn btn-primary">▶ Start Scanner</button>
+                <button id="stopBtn" onclick="stopScanner()" class="btn btn-secondary" style="display:none;">⏹ Stop</button>
+            </div>
+
+            <!-- Manual token input fallback -->
+            <div style="margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid rgba(255,255,255,0.08);">
+                <div style="font-size:.78rem;color:var(--muted);margin-bottom:.75rem;">Or enter ticket token manually</div>
+                <div style="display:flex;gap:8px;">
+                    <input id="manualToken" type="text" class="form-control" placeholder="e.g. EVT-A3K9 or full QR token..." style="font-family:monospace;font-size:.9rem;text-transform:uppercase;" oninput="this.value=this.value.toUpperCase()">
+                    <button onclick="manualCheckin()" class="btn btn-primary" style="flex-shrink:0;">Check In</button>
+                </div>
+            </div>
+
+            <!-- Upload Pass Image -->
+            <div style="margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid rgba(255,255,255,0.08);">
+                <div style="font-size:.78rem;color:var(--muted);margin-bottom:.75rem;">Or upload a downloaded pass image</div>
+
+                <label id="uploadZone" for="passImageInput"
+                    style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.5rem;
+                           border:2px dashed rgba(108,99,255,0.4);border-radius:12px;padding:1.5rem;cursor:pointer;
+                           background:rgba(108,99,255,0.05);transition:all .2s ease;min-height:110px;"
+                    ondragover="event.preventDefault();this.style.borderColor='#6C63FF';this.style.background='rgba(108,99,255,0.12)';"
+                    ondragleave="this.style.borderColor='rgba(108,99,255,0.4)';this.style.background='rgba(108,99,255,0.05)';"
+                    ondrop="handleDrop(event)">
+                    <span style="font-size:2rem;">🖼️</span>
+                    <span style="font-size:.85rem;font-weight:600;color:var(--text);">Click or drag &amp; drop pass image</span>
+                    <span style="font-size:.75rem;color:var(--muted);">PNG / JPG — the downloaded EventHub pass</span>
+                    <input type="file" id="passImageInput" accept="image/*" style="display:none;" onchange="handleImageUpload(this.files[0])">
+                </label>
+
+                <!-- Preview + decode result -->
+                <div id="uploadPreview" style="display:none;margin-top:1rem;">
+                    <canvas id="uploadCanvas" style="max-width:100%;border-radius:8px;border:1px solid rgba(255,255,255,0.1);display:block;margin:0 auto;"></canvas>
+                    <div id="uploadStatus" style="margin-top:.75rem;font-size:.875rem;text-align:center;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results panel -->
+    <div>
+        <!-- Last scan result -->
+        <div id="resultCard" class="card" style="display:none;margin-bottom:1.5rem;">
+            <div id="resultHeader" class="card-header"></div>
+            <div id="resultBody" class="card-body"></div>
+        </div>
+
+        <!-- Stats -->
+        <div class="card" style="margin-bottom:1.5rem;">
+            <div class="card-header"><h3 style="font-size:.95rem;">📊 Session Stats</h3></div>
+            <div class="card-body">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;text-align:center;">
+                    <div style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:1rem;">
+                        <div id="statSuccess" style="font-size:2rem;font-weight:800;color:#86efac;">0</div>
+                        <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;">Checked In</div>
+                    </div>
+                    <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.2);border-radius:10px;padding:1rem;">
+                        <div id="statDuplicate" style="font-size:2rem;font-weight:800;color:#fcd34d;">0</div>
+                        <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;">Duplicates</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent scans log -->
+        <div class="card">
+            <div class="card-header"><h3 style="font-size:.95rem;">📋 Recent Scans</h3></div>
+            <div id="scanLog" style="max-height:300px;overflow-y:auto;">
+                <div style="padding:2rem;text-align:center;color:var(--muted);font-size:.875rem;">No scans yet</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+@keyframes scanAnim {
+    0%   { top: 10%; }
+    50%  { top: 85%; }
+    100% { top: 10%; }
+}
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+<script>
+var videoStream = null;
+var scanning    = false;
+var scanInterval = null;
+var stats = { success: 0, duplicate: 0 };
+var lastToken = null;
+
+function startScanner() {
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+    .then(function(stream) {
+        videoStream = stream;
+        var video = document.getElementById('scanVideo');
+        video.srcObject = stream;
+        video.play();
+        video.style.display = 'block';
+        document.getElementById('cameraPlaceholder').style.display = 'none';
+        document.getElementById('startBtn').style.display = 'none';
+        document.getElementById('stopBtn').style.display = 'inline-flex';
+        document.getElementById('scanStatus').textContent = '🟢 Scanning...';
+        document.getElementById('scanStatus').style.color = '#86efac';
+        scanning = true;
+        scanInterval = setInterval(scanFrame, 300);
+    })
+    .catch(function(err) {
+        alert('Camera access denied. Use manual token entry below.');
+    });
+}
+
+function stopScanner() {
+    scanning = false;
+    clearInterval(scanInterval);
+    if (videoStream) { videoStream.getTracks().forEach(function(t){ t.stop(); }); }
+    document.getElementById('scanVideo').style.display = 'none';
+    document.getElementById('cameraPlaceholder').style.display = 'flex';
+    document.getElementById('startBtn').style.display = 'inline-flex';
+    document.getElementById('stopBtn').style.display = 'none';
+    document.getElementById('scanStatus').textContent = 'Camera off';
+    document.getElementById('scanStatus').style.color = '';
+}
+
+function scanFrame() {
+    var video  = document.getElementById('scanVideo');
+    var canvas = document.getElementById('scanCanvas');
+    if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    var ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    var code = jsQR(imageData.data, imageData.width, imageData.height);
+    if (code && code.data) {
+        // Extract token from URL
+        var url = code.data;
+        var token = url.split('/verify/').pop().split('?')[0].trim();
+        if (token && token !== lastToken) {
+            lastToken = token;
+            processCheckin(token);
+            setTimeout(function(){ lastToken = null; }, 3000); // cooldown
+        }
+    }
+}
+
+function manualCheckin() {
+    var token = document.getElementById('manualToken').value.trim();
+    if (!token) return;
+    processCheckin(token);
+    document.getElementById('manualToken').value = '';
+}
+
+function processCheckin(token) {
+    fetch('/checkin/' + token, { method: 'POST', headers: {'Content-Type':'application/json'} })
+    .then(function(r){ return r.json(); })
+    .then(function(d) { showResult(d); })
+    .catch(function() { showResult({status:'error', message:'Network error'}); });
+}
+
+function showResult(d) {
+    var card   = document.getElementById('resultCard');
+    var header = document.getElementById('resultHeader');
+    var body   = document.getElementById('resultBody');
+    card.style.display = 'block';
+
+    var colors = {
+        success:  { bg:'rgba(34,197,94,0.2)',  border:'rgba(34,197,94,0.4)',  icon:'✅', text:'#86efac' },
+        already:  { bg:'rgba(245,158,11,0.2)', border:'rgba(245,158,11,0.4)', icon:'⚠️', text:'#fcd34d' },
+        error:    { bg:'rgba(239,68,68,0.2)',  border:'rgba(239,68,68,0.4)',  icon:'❌', text:'#fca5a5' },
+    };
+    var c = colors[d.status] || colors.error;
+
+    card.style.borderColor = c.border;
+    header.style.background = c.bg;
+    header.innerHTML = '<div style="display:flex;align-items:center;gap:10px;"><span style="font-size:1.5rem;">' + c.icon + '</span><div><div style="font-weight:700;color:' + c.text + ';">' + d.message + '</div></div></div>';
+
+    if (d.name) {
+        body.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;font-size:.875rem;">' +
+            '<div><div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px;">Attendee</div><div style="font-weight:700;">' + d.name + '</div></div>' +
+            '<div><div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px;">Ticket Type</div><div style="font-weight:700;">' + d.type + '</div></div>' +
+            '</div>';
+    } else {
+        body.innerHTML = '';
+    }
+
+    // Update stats
+    if (d.status === 'success') stats.success++;
+    if (d.status === 'already') stats.duplicate++;
+    document.getElementById('statSuccess').textContent   = stats.success;
+    document.getElementById('statDuplicate').textContent = stats.duplicate;
+
+    // Add to log
+    addToLog(d);
+
+    // Flash animation
+    card.style.transform = 'scale(1.02)';
+    setTimeout(function(){ card.style.transform = 'scale(1)'; card.style.transition = 'transform .2s ease'; }, 150);
+}
+
+function addToLog(d) {
+    var log = document.getElementById('scanLog');
+    if (log.querySelector('div[style*="No scans"]')) log.innerHTML = '';
+    var icons = { success:'✅', already:'⚠️', error:'❌' };
+    var colors = { success:'#86efac', already:'#fcd34d', error:'#fca5a5' };
+    var entry = document.createElement('div');
+    entry.style.cssText = 'padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.06);display:flex;align-items:center;gap:10px;font-size:.82rem;';
+    entry.innerHTML = '<span>' + (icons[d.status]||'❌') + '</span>' +
+        '<div style="flex:1;"><div style="font-weight:600;color:' + (colors[d.status]||'#fca5a5') + ';">' + (d.name || 'Unknown') + '</div>' +
+        '<div style="color:var(--muted);font-size:.75rem;">' + (d.type || '') + ' · ' + new Date().toLocaleTimeString() + '</div></div>';
+    log.insertBefore(entry, log.firstChild);
+}
+
+/* ── Upload Pass Image ── */
+function handleDrop(e) {
+    e.preventDefault();
+    var zone = document.getElementById('uploadZone');
+    zone.style.borderColor = 'rgba(108,99,255,0.4)';
+    zone.style.background  = 'rgba(108,99,255,0.05)';
+    var file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('image/')) handleImageUpload(file);
+}
+
+function handleImageUpload(file) {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        var img = new Image();
+        img.onload = function() {
+            var canvas  = document.getElementById('uploadCanvas');
+            var ctx     = canvas.getContext('2d');
+            var preview = document.getElementById('uploadPreview');
+            var status  = document.getElementById('uploadStatus');
+
+            // Draw image on canvas
+            canvas.width  = img.width;
+            canvas.height = img.height;
+            ctx.drawImage(img, 0, 0);
+            preview.style.display = 'block';
+
+            // Show scanning indicator
+            status.innerHTML = '<span style="color:var(--muted);">🔍 Scanning for QR code...</span>';
+
+            // Try to decode QR from the full image
+            var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            var code = jsQR(imageData.data, imageData.width, imageData.height);
+
+            if (code && code.data) {
+                // Draw green box around QR
+                var loc = code.location;
+                ctx.strokeStyle = '#22C55E';
+                ctx.lineWidth   = Math.max(3, canvas.width / 150);
+                ctx.beginPath();
+                ctx.moveTo(loc.topLeftCorner.x,     loc.topLeftCorner.y);
+                ctx.lineTo(loc.topRightCorner.x,    loc.topRightCorner.y);
+                ctx.lineTo(loc.bottomRightCorner.x, loc.bottomRightCorner.y);
+                ctx.lineTo(loc.bottomLeftCorner.x,  loc.bottomLeftCorner.y);
+                ctx.closePath();
+                ctx.stroke();
+
+                status.innerHTML = '<span style="color:#86efac;font-weight:600;">✅ QR code found! Processing check-in...</span>';
+
+                // Extract token from URL or use raw value
+                var raw   = code.data;
+                var token = raw.split('/verify/').pop().split('?')[0].trim();
+
+                setTimeout(function() {
+                    processCheckin(token);
+                    // Reset upload zone for next scan
+                    setTimeout(function() {
+                        document.getElementById('passImageInput').value = '';
+                    }, 3000);
+                }, 600);
+
+            } else {
+                // QR not found — try scanning sub-regions (bottom half where QR usually is)
+                var halfH = Math.floor(canvas.height / 2);
+                var subData = ctx.getImageData(0, halfH, canvas.width, halfH);
+                var code2   = jsQR(subData.data, canvas.width, halfH);
+
+                if (code2 && code2.data) {
+                    var raw2   = code2.data;
+                    var token2 = raw2.split('/verify/').pop().split('?')[0].trim();
+                    status.innerHTML = '<span style="color:#86efac;font-weight:600;">✅ QR code found! Processing...</span>';
+                    setTimeout(function() { processCheckin(token2); }, 600);
+                } else {
+                    status.innerHTML = '<span style="color:#fca5a5;">❌ No QR code found in this image. Make sure it\'s a valid EventHub pass.</span>';
+                }
+            }
+        };
+        img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+</script>
+{% endblock %}

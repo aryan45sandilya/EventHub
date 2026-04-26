@@ -1,91 +1,51 @@
 {% extends "layout.html" %}
-
-{% block title %}Welcome to EventHub{% endblock %}
-
+{% block title %}EventHub — Discover & Host Events{% endblock %}
 {% block content %}
-<section class="hero">
-    <div class="container text-center">
-        <h1>Discover & Host Events with EventHub</h1>
-        <p class="lead">Your seamless platform for finding exciting events or organizing your own. Explore, book, and manage everything in one place.</p>
-        <div class="hero-buttons">
-            <a href="{{ url_for('list_events') }}" class="btn btn-primary btn-lg">Explore Events</a>
-            {% if 'user_role' in session and session['user_role'] == 'organizer' %}
-            <a href="{{ url_for('create_event') }}" class="btn btn-accent btn-lg">Create an Event</a>
-            {% elif 'user_id' not in session %}
-             <a href="{{ url_for('signup') }}" class="btn btn-accent btn-lg">Become an Organizer</a>
-            {% endif %}
-        </div>
-    </div>
-</section>
 
-<section class="featured-events">
-    <div class="container">
-        <h2 class="text-center mb-4">Featured Events</h2>
-        {% if events %}
-        <div class="events-grid">
-            {% for event in events %}
-            <div class="card event-card">
-                <div class="card-body">
-                    <h3 class="card-title">{{ event.name }}</h3>
-                    <p class="card-text text-muted">
-                        <small>
-                           {{ event.date.strftime('%a, %b %d, %Y') }}
-                           {% if event.start_time and event.end_time %}
-                           at {{ event.start_time.strftime('%I:%M %p') }} - {{ event.end_time.strftime('%I:%M %p') }}
-                           {% endif %}
-                           <br>
-                           {% if event.venue %}
-                             📍 {{ event.venue.name }}, {{ event.venue.city }}
-                           {% endif %}
-                        </small>
-                     </p>
-                    <p class="card-text">{{ event.description | truncate(100, True) }}</p>
-                </div>
-                 <div class="card-footer">
-                     <a href="{{ url_for('event_details', event_id=event.event_id) }}" class="btn btn-primary btn-sm">View Details & Tickets</a>
-                 </div>
-            </div>
-            {% endfor %}
-        </div>
-        <div class="text-center mt-4">
-             <a href="{{ url_for('list_events') }}" class="btn btn-link">View All Events</a>
-        </div>
-        {% else %}
-        <p class="text-center text-muted">No upcoming events found.</p>
+<div class="hero-section page-hero" style="text-align:center; padding:3rem 2rem;">
+    <span style="display:inline-block;background:rgba(255,255,255,0.15);color:#fff;font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;padding:4px 14px;border-radius:999px;margin-bottom:1rem;border:1px solid rgba(255,255,255,0.2);">✦ The Event Platform</span>
+    <h1 style="font-size:clamp(1.8rem,5vw,3rem);font-weight:800;color:#fff;line-height:1.15;letter-spacing:-1px;margin-bottom:1rem;">Discover &amp; Host <span style="color:#FDE68A;">Amazing Events</span></h1>
+    <p style="font-size:1rem;color:rgba(255,255,255,0.75);max-width:500px;margin:0 auto 2rem;">Your all-in-one platform for finding exciting events or organizing your own.</p>
+    <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;">
+        <a href="{{ url_for('list_events') }}" class="btn btn-lg" style="background:#fff;color:var(--primary);font-weight:700;">🎟 Browse Events</a>
+        {% if 'user_role' in session and session['user_role'] == 'organizer' %}
+        <a href="{{ url_for('create_event') }}" class="btn btn-lg btn-outline-primary" style="border-color:rgba(255,255,255,0.5);color:#fff;">+ Create Event</a>
+        {% elif 'user_id' not in session %}
+        <a href="{{ url_for('signup') }}" class="btn btn-lg btn-outline-primary" style="border-color:rgba(255,255,255,0.5);color:#fff;">Become an Organizer</a>
         {% endif %}
     </div>
-</section>
+</div>
 
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;gap:1rem;">
+    <h2 style="font-size:1.4rem;font-weight:800;">Featured Events</h2>
+    <a href="{{ url_for('list_events') }}" class="btn btn-secondary btn-sm">View All →</a>
+</div>
+
+{% if events %}
+<div class="events-grid">
+    {% for event in events %}
+    <div class="card event-card">
+        <div class="event-card-bar"></div>
+        <div class="card-body">
+            <span class="event-badge">Upcoming</span>
+            <h3 class="card-title">{{ event.name }}</h3>
+            <div class="event-meta-row">
+                <div class="event-meta-item">📅 {{ event.date.strftime('%a, %b %d, %Y') }}{% if event.start_time %} · {{ event.start_time.strftime('%I:%M %p') }}{% endif %}</div>
+                {% if event.venue %}<div class="event-meta-item">📍 {{ event.venue.name }}, {{ event.venue.city }}</div>{% endif %}
+            </div>
+            <p class="event-desc">{{ event.description | truncate(110, True) }}</p>
+        </div>
+        <div class="card-footer">
+            <a href="{{ url_for('event_details', event_id=event.event_id) }}" class="btn btn-primary btn-sm">View Details & Tickets</a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div style="text-align:center;padding:4rem 2rem;color:var(--muted);">
+    <div style="font-size:3rem;margin-bottom:1rem;">🎪</div>
+    <h3 style="margin-bottom:8px;">No upcoming events yet</h3>
+    <p>Check back soon!</p>
+</div>
+{% endif %}
 {% endblock %}
-
-{% block head_extra %}
-<style>
-    .hero {
-        background-color: var(--secondary-color);
-        padding: 4rem 0;
-        margin-bottom: 2rem;
-    }
-    .hero h1 {
-        color: var(--primary-color);
-        margin-bottom: 1rem;
-        font-size: 2.8rem;
-    }
-    .hero p.lead {
-        font-size: 1.2rem;
-        color: #555;
-        max-width: 700px;
-        margin: 0 auto 1.5rem auto;
-    }
-    .hero-buttons .btn {
-        margin: 0 0.5rem;
-    }
-    .featured-events {
-        padding: 2rem 0;
-    }
-     .event-card .card-text small {
-        display: block;
-        margin-bottom: 0.5rem;
-    }
-</style>
-{% endblock %}
-

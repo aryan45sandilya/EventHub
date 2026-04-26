@@ -3,65 +3,192 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>{% block title %}EventHub{% endblock %}</title>
-    <!-- Basic Styling - Replace or extend with a CSS framework like Bootstrap or Tailwind -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <!-- Add any other CSS/JS links here -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ now.timestamp()|int }}">
     {% block head_extra %}{% endblock %}
 </head>
 <body>
     <header>
-        <nav class="navbar">    
+        <nav class="navbar">
             <div class="container">
-                <a class="navbar-brand" href="{{ url_for('index') }}">
-                    <span>EventHub</span>
-                </a>
-                <ul class="nav-links">
+                <a class="navbar-brand" href="{{ url_for('index') }}">EventHub</a>
+
+                <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation">
+                    <span></span><span></span><span></span>
+                </button>
+
+                <ul class="nav-links" id="navLinks">
                     <li><a href="{{ url_for('index') }}">Home</a></li>
                     <li><a href="{{ url_for('list_events') }}">Browse Events</a></li>
                     {% if 'user_id' in session %}
-                        {% if session['user_role'] == 'organizer' %}
+                        {% if session['user_role'] == 'organizer' or session['user_role'] == 'administrator' %}
                             <li><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li><a href="{{ url_for('ai_planner') }}">🤖 AI Planner</a></li>
+                            <li><a href="{{ url_for('qr_scanner') }}">📷 Scanner</a></li>
                         {% else %}
-                             <li><a href="{{ url_for('my_tickets') }}">My Tickets</a></li>
+                            <li><a href="{{ url_for('my_tickets') }}">My Tickets</a></li>
+                            <li><a href="{{ url_for('reminders') }}">⏰ Reminders</a></li>
                         {% endif %}
-                         <li><span class="nav-user">Hi, {{ session['user_name'] }}!</span></li>
-                        <li><a href="{{ url_for('logout') }}">Logout</a></li>
+                        <li><span class="nav-user">{{ session['user_name'] }}</span></li>
+                        <li><a href="{{ url_for('logout') }}" class="btn btn-sm btn-secondary">Logout</a></li>
                     {% else %}
                         <li><a href="{{ url_for('login') }}">Login</a></li>
-                        <li><a href="{{ url_for('signup') }}">Sign Up</a></li>
+                        <li><a href="{{ url_for('signup') }}" class="btn btn-sm btn-primary">Sign Up</a></li>
                     {% endif %}
                 </ul>
             </div>
         </nav>
     </header>
 
-    <main class="container main-content">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                <div class="flash-messages">
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-                </div>
-            {% endif %}
-        {% endwith %}
+    <main class="main-content">
+        <div class="container">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <div class="flash-messages">
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                    </div>
+                {% endif %}
+            {% endwith %}
 
-        {% block content %}
-        <!-- Page-specific content will be injected here -->
-        {% endblock %}
+            {% block content %}{% endblock %}
+        </div>
     </main>
 
-    <footer class="footer">
+    <footer>
         <div class="container">
-            <p>&copy; {{ now.year }} EventHub. All rights reserved.</p>
+            <p>✦ EventHub &nbsp;·&nbsp; &copy; {{ now.year }} All rights reserved.</p>
         </div>
     </footer>
 
-    <!-- Add any JavaScript files here -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script>
+        // Mobile nav toggle
+        const toggle = document.getElementById('navToggle');
+        const links  = document.getElementById('navLinks');
+        if (toggle && links) {
+            toggle.addEventListener('click', () => links.classList.toggle('open'));
+        }
+    </script>
     {% block scripts %}{% endblock %}
     {% block scripts_extra %}{% endblock %}
+
+    <!-- ── AI Chat Assistant ── -->
+    <div id="chatBubble" onclick="toggleChat()" style="position:fixed;bottom:28px;right:28px;z-index:8888;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#6C63FF,#EC4899);box-shadow:0 4px 20px rgba(108,99,255,0.5);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.5rem;transition:transform .2s ease;user-select:none;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
+        <span id="chatBubbleIcon">🤖</span>
+        <div id="chatDot" style="position:absolute;top:2px;right:2px;width:12px;height:12px;background:#22C55E;border-radius:50%;border:2px solid #0f0c29;"></div>
+    </div>
+
+    <div id="chatWindow" style="display:none;position:fixed;bottom:96px;right:28px;z-index:8887;width:340px;max-height:480px;background:#1a1535;border:1px solid rgba(255,255,255,0.15);border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,0.5);overflow:hidden;flex-direction:column;">
+        <!-- Header -->
+        <div style="background:linear-gradient(135deg,#6C63FF,#EC4899);padding:14px 16px;display:flex;align-items:center;gap:10px;">
+            <div style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;font-size:1.2rem;">🤖</div>
+            <div>
+                <div style="color:#fff;font-weight:700;font-size:.9rem;">EventHub Assistant</div>
+                <div style="color:rgba(255,255,255,0.7);font-size:.72rem;">● Online · Always here to help</div>
+            </div>
+            <button onclick="toggleChat()" style="margin-left:auto;background:rgba(255,255,255,0.15);border:none;color:#fff;width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:.9rem;line-height:1;">✕</button>
+        </div>
+        <!-- Messages -->
+        <div id="chatMessages" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;max-height:300px;">
+            <div class="chat-msg bot">
+                <div style="background:rgba(108,99,255,0.2);border:1px solid rgba(108,99,255,0.3);border-radius:14px 14px 14px 4px;padding:10px 14px;font-size:.85rem;color:var(--text);max-width:85%;">
+                    👋 Hi! I'm your EventHub AI assistant. Ask me anything about events, tickets, payments, or planning!
+                </div>
+            </div>
+        </div>
+        <!-- Quick replies -->
+        <div id="quickReplies" style="padding:0 14px 10px;display:flex;flex-wrap:wrap;gap:6px;">
+            <button onclick="sendQuick('How to book a ticket?')" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:var(--muted);border-radius:999px;padding:4px 10px;font-size:.72rem;cursor:pointer;">🎟 Book ticket</button>
+            <button onclick="sendQuick('How to cancel?')" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:var(--muted);border-radius:999px;padding:4px 10px;font-size:.72rem;cursor:pointer;">❌ Cancel</button>
+            <button onclick="sendQuick('Payment methods')" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:var(--muted);border-radius:999px;padding:4px 10px;font-size:.72rem;cursor:pointer;">💳 Payment</button>
+            <button onclick="sendQuick('AI Event Planner')" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:var(--muted);border-radius:999px;padding:4px 10px;font-size:.72rem;cursor:pointer;">🤖 AI Planner</button>
+        </div>
+        <!-- Input -->
+        <div style="padding:10px 14px 14px;border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:8px;">
+            <input id="chatInput" type="text" placeholder="Ask me anything..." onkeydown="if(event.key==='Enter')sendChat()"
+                style="flex:1;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);border-radius:999px;padding:8px 14px;color:var(--text);font-size:.85rem;outline:none;">
+            <button onclick="sendChat()" style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#6C63FF,#EC4899);border:none;color:#fff;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;">➤</button>
+        </div>
+    </div>
+
+    <script>
+    function toggleChat() {
+        var w = document.getElementById('chatWindow');
+        var open = w.style.display === 'flex';
+        w.style.display = open ? 'none' : 'flex';
+        w.style.flexDirection = 'column';
+        document.getElementById('chatBubbleIcon').textContent = open ? '🤖' : '✕';
+        if (!open) document.getElementById('chatInput').focus();
+    }
+
+    function sendQuick(msg) {
+        document.getElementById('chatInput').value = msg;
+        sendChat();
+    }
+
+    function sendChat() {
+        var input = document.getElementById('chatInput');
+        var msg = input.value.trim();
+        if (!msg) return;
+        input.value = '';
+
+        // Hide quick replies after first message
+        document.getElementById('quickReplies').style.display = 'none';
+
+        appendMsg(msg, 'user');
+        appendTyping();
+
+        fetch('/api/chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({message: msg})
+        })
+        .then(function(r){ return r.json(); })
+        .then(function(data) {
+            removeTyping();
+            appendMsg(data.reply, 'bot');
+        })
+        .catch(function() {
+            removeTyping();
+            appendMsg("Sorry, I'm having trouble connecting. Please try again! 😅", 'bot');
+        });
+    }
+
+    function appendMsg(text, who) {
+        var msgs = document.getElementById('chatMessages');
+        var div = document.createElement('div');
+        div.style.cssText = 'display:flex;' + (who === 'user' ? 'justify-content:flex-end;' : '');
+        var bubble = document.createElement('div');
+        bubble.style.cssText = who === 'user'
+            ? 'background:linear-gradient(135deg,#6C63FF,#8B5CF6);border-radius:14px 14px 4px 14px;padding:10px 14px;font-size:.85rem;color:#fff;max-width:85%;'
+            : 'background:rgba(108,99,255,0.2);border:1px solid rgba(108,99,255,0.3);border-radius:14px 14px 14px 4px;padding:10px 14px;font-size:.85rem;color:var(--text);max-width:85%;';
+        bubble.textContent = text;
+        div.appendChild(bubble);
+        msgs.appendChild(div);
+        msgs.scrollTop = msgs.scrollHeight;
+    }
+
+    function appendTyping() {
+        var msgs = document.getElementById('chatMessages');
+        var div = document.createElement('div');
+        div.id = 'typingIndicator';
+        div.innerHTML = '<div style="background:rgba(108,99,255,0.2);border:1px solid rgba(108,99,255,0.3);border-radius:14px 14px 14px 4px;padding:10px 14px;font-size:.85rem;color:var(--muted);">typing...</div>';
+        msgs.appendChild(div);
+        msgs.scrollTop = msgs.scrollHeight;
+    }
+
+    function removeTyping() {
+        var t = document.getElementById('typingIndicator');
+        if (t) t.remove();
+    }
+    </script>
 </body>
 </html>
-

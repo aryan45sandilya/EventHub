@@ -1,100 +1,155 @@
 {% extends "layout.html" %}
-
-{% block title %}My Tickets - EventHub{% endblock %}
-
+{% block title %}My Tickets — EventHub{% endblock %}
 {% block content %}
-<div class="container">
-    <h1 class="mb-4">My Booked Tickets</h1>
 
-    {% if orders %}
-        {% for order in orders %}
-            <div class="card order-card mb-4">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span>Order #{{ order.order_id }} - Placed on {{ order.date.strftime('%Y-%m-%d %H:%M') }}</span>
-                    <span class="order-total">Total: <strong>₹{{ "%.2f"|format(order.total_price) }}</strong></span>
-                </div>
-                <div class="card-body">
-                    {% if order.tickets %}
-                        <h5 class="mb-3">Tickets in this Order:</h5>
-                        <ul class="list-group list-group-flush">
-                            {% for ticket in order.tickets %}
-                                <li class="list-group-item d-flex justify-content-between align-items-center ticket-item">
-                                    <div>
-                                        <strong>{{ ticket.event.name }}</strong> <br>
-                                        <small class="text-muted">
-                                            {{ ticket.event.date.strftime('%a, %b %d, %Y') }}
-                                            {% if ticket.event.start_time and ticket.event.end_time %}
-                                                at {{ ticket.event.start_time.strftime('%I:%M %p') }} - {{ ticket.event.end_time.strftime('%I:%M %p') }}
-                                            {% endif %}
-                                            <br>
-                                            Type: {{ ticket.type | title }}
-                                            {% if ticket.seat_number %} | Seat: {{ ticket.seat_number }} {% endif %}
-                                            | Price: ₹{{ "%.2f"|format(ticket.price) }}
-                                        </small>
-                                    </div>
-                                    <div>
-                                        <a href="{{ url_for('event_details', event_id=ticket.event_id) }}" class="btn btn-sm btn-outline-primary">View Event</a>
-                                        <form method="POST" action="{{ url_for('cancel_ticket', ticket_id=ticket.ticket_id) }}" 
-                                              onsubmit="return confirm('Are you sure you want to cancel this ticket?');" 
-                                              style="display: inline;">
-                                            <button type="submit" class="btn btn-sm btn-outline-danger">Cancel</button>
-                                        </form>
-                                    </div>
-                                </li>
-                            {% endfor %}
-                        </ul>
-                    {% else %}
-                        <p class="text-muted">No ticket details found for this order.</p>
-                    {% endif %}
-                </div>
-                {% if order.payment %}
-                <div class="card-footer text-muted">
-                    Payment Method: {{ order.payment.payment_method | title }}
-                    {% if order.payment.transaction_id %}| Transaction ID: {{ order.payment.transaction_id }}{% endif %}
-                </div>
-                {% endif %}
-            </div>
-        {% endfor %}
-    {% else %}
-        <div class="card card-body text-center">
-            <p class="text-muted">You haven't booked any tickets yet.</p>
-            <a href="{{ url_for('list_events') }}" class="btn btn-primary">Browse Events</a>
-        </div>
-    {% endif %}
+<div class="page-hero">
+    <h1>My Tickets</h1>
+    <p>All your booked event tickets in one place.</p>
 </div>
-{% endblock %}
 
-{% block head_extra %}
-<style>
-    .order-card .card-header {
-        background-color: #f8f9fa;
-    }
-    .order-total strong {
-        color: var(--primary-color);
-    }
-    .list-group {
-        padding-left: 0;
-        list-style: none;
-    }
-    .list-group-item {
-        border-bottom: 1px solid var(--border-color);
-        padding: 1rem 0;
-    }
-    .list-group-item:last-child {
-        border-bottom: none;
-        padding-bottom: 0;
-    }
-    .ticket-item small { 
-        line-height: 1.4; 
-    }
-    .btn-outline-primary {
-        color: var(--primary-color);
-        border-color: var(--primary-color);
-    }
-    .btn-outline-primary:hover {
-        background-color: var(--primary-color);
-        color: white;
-    }
-</style>
-{% endblock %}
+{% if orders %}
+    {% for order in orders %}
+    <div class="card order-card">
+        <div class="card-header">
+            <div>
+                <div class="order-id">Order #{{ order.order_id }}</div>
+                <div class="order-date">{{ order.date.strftime('%B %d, %Y at %I:%M %p') }}</div>
+            </div>
+            <div class="order-total">&#8377;{{ "%.2f"|format(order.total_price) }}</div>
+        </div>
+        <div class="card-body">
+            {% if order.tickets %}
+                {% for ticket in order.tickets %}
+                <div class="ticket-row">
+                    <div>
+                        <div class="ticket-event-name">{{ ticket.event.name }}</div>
+                        <div class="ticket-meta">
+                            📅 {{ ticket.event.date.strftime('%a, %b %d, %Y') }}{% if ticket.event.start_time %} · {{ ticket.event.start_time.strftime('%I:%M %p') }}{% endif %}<br>
+                            🎟 {{ ticket.type | title }}{% if ticket.seat_number %} · Seat {{ ticket.seat_number }}{% endif %} · &#8377;{{ "%.2f"|format(ticket.price) }}
+                        </div>
+                    </div>
+                    <div class="ticket-actions">
+                        <a href="{{ url_for('digital_pass', ticket_id=ticket.ticket_id) }}" class="btn btn-sm btn-primary">🎟 View Pass</a>
+                        <a href="{{ url_for('event_details', event_id=ticket.event_id) }}" class="btn btn-sm btn-outline-primary">View Event</a>
+                        <form method="POST" action="{{ url_for('cancel_ticket', ticket_id=ticket.ticket_id) }}" onsubmit="return confirm('Cancel this ticket?');" style="display:inline;">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">Cancel</button>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p class="text-muted">No ticket details for this order.</p>
+            {% endif %}
+        </div>
 
+        {% if order.payment %}
+        <div class="card-footer" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;">
+            <span>
+                {% if order.payment.payment_method == 'credit card' %}💳{% elif order.payment.payment_method == 'paypal' %}🅿️{% else %}🏦{% endif %}
+                <strong>{{ order.payment.payment_method | title }}</strong>
+                &nbsp;·&nbsp;<span style="color:var(--success);font-size:.82rem;">✓ Paid</span>
+            </span>
+            {% if order.payment.transaction_id %}
+            <span style="font-family:monospace;font-size:.78rem;background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);">
+                TXN: {{ order.payment.transaction_id }}
+            </span>
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="card-footer" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;">
+            <span style="color:var(--warning);font-size:.85rem;font-weight:600;">⚠️ Payment not completed</span>
+            <button type="button"
+                    onclick="openPendingPayment({{ order.order_id }}, '{{ '%.2f' | format(order.total_price) }}')"
+                    class="btn btn-sm btn-primary">Complete Payment</button>
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+{% else %}
+<div class="tickets-empty">
+    <div class="tickets-empty-icon">🎫</div>
+    <h3>No tickets yet</h3>
+    <p>You haven't booked any tickets. Explore events and grab your spot!</p>
+    <a href="{{ url_for('list_events') }}" class="btn btn-primary">Browse Events</a>
+</div>
+{% endif %}
+
+<!-- ── Payment Modal ── -->
+<div id="pendingPayModal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.75);backdrop-filter:blur(6px);">
+    <div style="display:flex;align-items:center;justify-content:center;min-height:100%;padding:1rem;">
+        <div style="background:#1a1535;border:1px solid rgba(255,255,255,0.15);border-radius:20px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.6);overflow:hidden;">
+
+            <div style="background:linear-gradient(135deg,#6C63FF,#8B5CF6);padding:1.25rem 1.5rem;display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                    <div style="color:#fff;font-weight:800;font-size:1rem;">Complete Payment</div>
+                    <div id="pp-amount" style="color:rgba(255,255,255,0.75);font-size:.85rem;margin-top:2px;"></div>
+                </div>
+                <button type="button" onclick="closePendingPayment()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:1rem;line-height:1;">✕</button>
+            </div>
+
+            <form id="pendingPayForm" method="POST" action="">
+                <div style="padding:1.5rem;">
+                    <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:.75rem;">Select Payment Method</div>
+                    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:1.5rem;">
+
+                        <label id="ppm-card" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1.5px solid rgba(255,255,255,0.1);border-radius:10px;cursor:pointer;">
+                            <input type="radio" name="payment_method" value="credit card" style="accent-color:#6C63FF;" onchange="highlightPPM()" checked>
+                            <span style="font-size:1.1rem;">💳</span>
+                            <div>
+                                <div style="font-weight:600;font-size:.875rem;color:var(--text);">Credit / Debit Card</div>
+                                <div style="font-size:.75rem;color:var(--muted);">Visa, Mastercard, RuPay</div>
+                            </div>
+                        </label>
+
+                        <label id="ppm-paypal" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1.5px solid rgba(255,255,255,0.1);border-radius:10px;cursor:pointer;">
+                            <input type="radio" name="payment_method" value="paypal" style="accent-color:#6C63FF;" onchange="highlightPPM()">
+                            <span style="font-size:1.1rem;">🅿️</span>
+                            <div>
+                                <div style="font-weight:600;font-size:.875rem;color:var(--text);">PayPal</div>
+                                <div style="font-size:.75rem;color:var(--muted);">Pay via PayPal account</div>
+                            </div>
+                        </label>
+
+                        <label id="ppm-other" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1.5px solid rgba(255,255,255,0.1);border-radius:10px;cursor:pointer;">
+                            <input type="radio" name="payment_method" value="other" style="accent-color:#6C63FF;" onchange="highlightPPM()">
+                            <span style="font-size:1.1rem;">🏦</span>
+                            <div>
+                                <div style="font-weight:600;font-size:.875rem;color:var(--text);">UPI / Net Banking</div>
+                                <div style="font-size:.75rem;color:var(--muted);">GPay, PhonePe, BHIM</div>
+                            </div>
+                        </label>
+
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width:100%;padding:12px;font-size:.95rem;">✓ Confirm Payment</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function openPendingPayment(orderId, amount) {
+    document.getElementById('pp-amount').textContent = 'Order #' + orderId + '  ·  ₹' + amount;
+    document.getElementById('pendingPayForm').action = '/orders/' + orderId + '/pay';
+    highlightPPM();
+    document.getElementById('pendingPayModal').style.display = 'block';
+    document.body.style.overflow = 'hidden';
+}
+function closePendingPayment() {
+    document.getElementById('pendingPayModal').style.display = 'none';
+    document.body.style.overflow = '';
+}
+function highlightPPM() {
+    ['ppm-card','ppm-paypal','ppm-other'].forEach(function(id) {
+        var el = document.getElementById(id);
+        var r  = el.querySelector('input[type=radio]');
+        el.style.borderColor = r.checked ? '#6C63FF' : 'rgba(255,255,255,0.1)';
+        el.style.background  = r.checked ? 'rgba(108,99,255,0.15)' : 'transparent';
+    });
+}
+document.getElementById('pendingPayModal').addEventListener('click', function(e) {
+    if (e.target === this) closePendingPayment();
+});
+</script>
+
+{% endblock %}

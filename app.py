@@ -20,6 +20,17 @@ app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
     'sqlite:///' + os.path.join(os.path.abspath(os.path.dirname(__file__)), 'eventhub.db')
 )
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.jinja_env.auto_reload = True
+app.jinja_env.bytecode_cache = None
+
+# Force no-cache on all responses so browser never serves stale pages
+@app.after_request
+def add_no_cache_headers(response):
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 # Initialize SQLAlchemy
 db = SQLAlchemy(app)
@@ -118,12 +129,16 @@ class Payment(db.Model):
 
 class Ticket(db.Model):
     __tablename__ = 'ticket'
-    ticket_id = db.Column(db.Integer, primary_key=True)
-    event_id = db.Column(db.Integer, db.ForeignKey('event.event_id'), nullable=False)
-    order_id = db.Column(db.Integer, db.ForeignKey('order.order_id'), nullable=False)
-    price = db.Column(db.Numeric(10, 2), nullable=False)
-    type = db.Column(db.String(50), nullable=False)
+    ticket_id   = db.Column(db.Integer, primary_key=True)
+    event_id    = db.Column(db.Integer, db.ForeignKey('event.event_id'), nullable=False)
+    order_id    = db.Column(db.Integer, db.ForeignKey('order.order_id'), nullable=False)
+    price       = db.Column(db.Numeric(10, 2), nullable=False)
+    type        = db.Column(db.String(50), nullable=False)
     seat_number = db.Column(db.Integer)
+    qr_token    = db.Column(db.String(64), unique=True)   # unique token for QR
+    checked_in  = db.Column(db.Boolean, default=False)
+    checked_in_at = db.Column(db.DateTime, nullable=True)
+    short_code  = db.Column(db.String(12), unique=True)   # e.g. EVT-A3K9
 
 class Speaker(db.Model):
     __tablename__ = 'speaker'
@@ -141,6 +156,19 @@ class TicketType(db.Model):
     quantity = db.Column(db.Integer, nullable=False)
     event = db.relationship('Event', backref=db.backref('ticket_types', lazy=True))
 
+class Reminder(db.Model):
+    __tablename__ = 'reminder'
+    reminder_id = db.Column(db.Integer, primary_key=True)
+    user_id     = db.Column(db.Integer, db.ForeignKey('user.user_id'), nullable=False)
+    event_id    = db.Column(db.Integer, db.ForeignKey('event.event_id'), nullable=False)
+    remind_at   = db.Column(db.DateTime, nullable=False)
+    method      = db.Column(db.String(20), default='email')   # email / sms
+    message     = db.Column(db.Text)
+    sent        = db.Column(db.Boolean, default=False)
+    created_at  = db.Column(db.DateTime, default=datetime.datetime.now)
+    user  = db.relationship('User',  backref='reminders')
+    event = db.relationship('Event', backref='reminders')
+
 # --- Helper Functions ---
 def hash_password(password):
     """Hashes a password using bcrypt."""
@@ -151,6 +179,26 @@ def check_password(hashed_password, user_password):
     if isinstance(hashed_password, str):
         hashed_password = hashed_password.encode('utf-8')
     return bcrypt.checkpw(user_password.encode('utf-8'), hashed_password)
+
+def generate_qr_image(data: str) -> str:
+    """Generate a QR code and return as base64 PNG string."""
+    import qrcode, io, base64
+    qr = qrcode.QRCode(version=2, error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=10, border=3)
+    qr.add_data(data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="#000000", back_color="#ffffff")
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    return base64.b64encode(buf.getvalue()).decode('utf-8')
+
+def generate_short_code() -> str:
+    """Generate a short human-readable ticket code like EVT-A3K9."""
+    import random, string
+    chars = string.ascii_uppercase + string.digits
+    # Remove confusing chars: 0,O,I,1,L
+    chars = chars.translate(str.maketrans('', '', '0OI1L'))
+    part = ''.join(random.choices(chars, k=4))
+    return f'EVT-{part}'
 
 # --- Decorators ---
 def login_required(role="attendee"):
@@ -661,23 +709,24 @@ def book_ticket(event_id):
     if 'user_id' not in session or session.get('user_role') != 'attendee':
         flash('Please login as an attendee to book tickets.', 'danger')
         return redirect(url_for('login'))
-    
+
     event = Event.query.get_or_404(event_id)
     ticket_type_name = request.form.get('ticket_type')
     quantity = int(request.form.get('quantity', 1))
-    
-    # Find the ticket type by name
+    payment_method = request.form.get('payment_method', 'other')
+
     ticket_type = TicketType.query.filter_by(
         event_id=event_id,
         type=ticket_type_name
     ).first()
-    
+
     if not ticket_type or quantity < 1 or quantity > ticket_type.quantity:
         flash('Invalid ticket selection or not enough tickets available.', 'danger')
         return redirect(url_for('event_details', event_id=event_id))
-    
+
     try:
-        # Create order
+        import uuid
+        # Step 1: Create order
         order = Order(
             user_id=session['user_id'],
             date=datetime.datetime.now(),
@@ -685,28 +734,50 @@ def book_ticket(event_id):
         )
         db.session.add(order)
         db.session.flush()  # Get order_id
-        
-        # Create tickets
+
+        # Step 2: Create tickets
         for _ in range(quantity):
+            import uuid as _uuid
+            token = _uuid.uuid4().hex  # unique 32-char token
+            # Generate unique short code
+            sc = generate_short_code()
+            while Ticket.query.filter_by(short_code=sc).first():
+                sc = generate_short_code()
             ticket = Ticket(
                 event_id=event_id,
                 order_id=order.order_id,
                 price=ticket_type.price,
-                type=ticket_type.type
+                type=ticket_type.type,
+                qr_token=token,
+                short_code=sc
             )
             db.session.add(ticket)
-        
-        # Update available tickets
+
+        # Step 3: Reduce available quantity
         ticket_type.quantity -= quantity
-        
+        db.session.flush()
+
+        # Step 4: Create payment
+        payment = Payment(
+            order_id=order.order_id,
+            payment_method=payment_method,
+            transaction_id=str(uuid.uuid4())[:12].upper()
+        )
+        db.session.add(payment)
+        db.session.flush()
+
+        # Step 5: Link payment back to order
+        order.payment_id = payment.payment_id
+
         db.session.commit()
-        flash(f'Successfully booked {quantity} {ticket_type.type} ticket(s)!', 'success')
+        flash(f'Successfully booked {quantity} {ticket_type.type} ticket(s)! Payment via {payment_method.title()}.', 'success')
     except Exception as e:
         db.session.rollback()
         flash('An error occurred while booking tickets.', 'danger')
+        app.logger.error(f"Booking error: {str(e)}", exc_info=True)
         app.logger.error(f"Error booking tickets: {str(e)}")
-    
-    return redirect(url_for('event_details', event_id=event_id))
+
+    return redirect(url_for('my_tickets'))
 
 @app.route('/my-tickets')
 @login_required(role="attendee")
@@ -715,8 +786,37 @@ def my_tickets():
      user_id = session['user_id']
      # Fetch orders and associated tickets for the user
      orders = Order.query.filter_by(user_id=user_id).options(db.joinedload(Order.tickets).joinedload(Ticket.event)).order_by(Order.date.desc()).all()
-     # tickets = Ticket.query.join(Order).filter(Order.user_id == user_id).options(db.joinedload(Ticket.event)).all() # Alternative query
      return render_template('my_tickets.html', orders=orders)
+
+@app.route('/orders/<int:order_id>/pay', methods=['POST'])
+@login_required(role="attendee")
+def complete_payment(order_id):
+    """Add payment to an existing unpaid order."""
+    import uuid
+    order = Order.query.get_or_404(order_id)
+    if order.user_id != session['user_id']:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('my_tickets'))
+    if order.payment:
+        flash('This order already has a payment.', 'info')
+        return redirect(url_for('my_tickets'))
+    payment_method = request.form.get('payment_method', 'other')
+    try:
+        import uuid
+        payment = Payment(
+            order_id=order.order_id,
+            payment_method=payment_method,
+            transaction_id=str(uuid.uuid4())[:12].upper()
+        )
+        db.session.add(payment)
+        db.session.flush()
+        order.payment_id = payment.payment_id
+        db.session.commit()
+        flash(f'Payment completed via {payment_method.title()}!', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Payment failed: {e}', 'danger')
+    return redirect(url_for('my_tickets'))
 
 @app.route('/admin/organizers')
 @login_required(role="administrator")
@@ -758,9 +858,371 @@ def delete_organizer(user_id):
     return redirect(url_for('manage_organizers'))
 
 # --- Main Execution ---
+
+# ── Digital Pass & QR Entry ──
+
+@app.route('/tickets/<int:ticket_id>/pass')
+@login_required(role="attendee")
+def digital_pass(ticket_id):
+    """Show the digital pass with QR code for a ticket."""
+    ticket = Ticket.query.get_or_404(ticket_id)
+    if ticket.order.user_id != session['user_id']:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('my_tickets'))
+    if not ticket.qr_token:
+        import uuid as _uuid
+        ticket.qr_token = _uuid.uuid4().hex
+        db.session.commit()
+    if not ticket.short_code:
+        ticket.short_code = generate_short_code()
+        db.session.commit()
+    qr_data = request.host_url.rstrip('/') + url_for('verify_ticket', token=ticket.qr_token)
+    qr_b64  = generate_qr_image(qr_data)
+    return render_template('digital_pass.html', ticket=ticket, qr_b64=qr_b64, qr_data=qr_data)
+
+
+@app.route('/tickets/<int:ticket_id>/pass/download')
+@login_required(role="attendee")
+def download_pass(ticket_id):
+    """Generate and serve the pass as a downloadable PNG image."""
+    from flask import send_file
+    import io, qrcode
+    from PIL import Image, ImageDraw, ImageFont
+
+    ticket = Ticket.query.get_or_404(ticket_id)
+    if ticket.order.user_id != session['user_id']:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('my_tickets'))
+
+    # ── Constants ──
+    W, H    = 800, 1000
+    PURPLE  = (108, 99, 255)
+    DARK    = (26,  16,  64)
+    DARKER  = (13,  11,  30)
+    WHITE   = (255, 255, 255)
+    MUTED   = (136, 146, 170)
+    GREEN   = (34,  197,  94)
+    LAVENDER= (167, 139, 250)
+    PINK    = (236,  72, 153)
+
+    # ── Fonts (absolute paths — fast, no search) ──
+    BASE = 'C:/Windows/Fonts/'
+    def fnt(name, size):
+        try:    return ImageFont.truetype(BASE + name, size)
+        except: return ImageFont.load_default()
+
+    f_title  = fnt('arialbd.ttf', 36)
+    f_med    = fnt('arial.ttf',   24)
+    f_sm     = fnt('arial.ttf',   18)
+    f_xs     = fnt('arial.ttf',   14)
+    f_mono   = fnt('consola.ttf', 44)
+    f_mono_s = fnt('consola.ttf', 16)
+
+    # ── Canvas ──
+    img  = Image.new('RGB', (W, H), DARKER)
+    draw = ImageDraw.Draw(img)
+
+    # ── Header — single gradient using two rectangles blended ──
+    header_h = 200
+    grad = Image.new('RGB', (W, header_h))
+    gd   = ImageDraw.Draw(grad)
+    for x in range(W):
+        t = x / W
+        r = int(108 + (236-108)*t)
+        g = int(99  + (72 -99 )*t)
+        b = int(255 + (153-255)*t)
+        gd.line([(x,0),(x,header_h)], fill=(r,g,b))
+    img.paste(grad, (0, 0))
+
+    # ── Header text ──
+    draw.text((36, 22),  "DIGITAL EVENT PASS", font=f_xs, fill=(255,255,255,180))
+    name = ticket.event.name[:38]
+    draw.text((36, 44),  name, font=f_title, fill=WHITE)
+    date_str = ticket.event.date.strftime('%A, %B %d, %Y')
+    if ticket.event.start_time:
+        date_str += '  ·  ' + ticket.event.start_time.strftime('%I:%M %p')
+    draw.text((36, 96),  date_str, font=f_sm, fill=(255,255,255,200))
+    draw.text((36, 128), f"{ticket.event.venue.name}, {ticket.event.venue.city}", font=f_sm, fill=(255,255,255,160))
+
+    # ── Dashed separator ──
+    y_sep = header_h + 10
+    for x in range(0, W, 18):
+        draw.rectangle([(x, y_sep), (x+9, y_sep+2)], fill=(80,70,120))
+
+    # ── Details grid ──
+    fields = [
+        ("ATTENDEE",    ticket.order.user.name[:28]),
+        ("TICKET TYPE", ticket.type.title()),
+        ("TICKET ID",   f"#{ticket.ticket_id:06d}"),
+        ("PRICE PAID",  f"Rs. {float(ticket.price):.2f}"),
+    ]
+    col_w = W // 2
+    for idx, (label, value) in enumerate(fields):
+        col = idx % 2
+        row = idx // 2
+        x = 36 + col * col_w
+        y = y_sep + 20 + row * 72
+        draw.text((x, y),      label, font=f_xs,  fill=MUTED)
+        draw.text((x, y + 20), value, font=f_med,  fill=WHITE)
+
+    # ── QR Code ──
+    qr_data = request.host_url.rstrip('/') + url_for('verify_ticket', token=ticket.qr_token)
+    qr = qrcode.QRCode(version=2, error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=7, border=2)
+    qr.add_data(qr_data)
+    qr.make(fit=True)
+    qr_img  = qr.make_image(fill_color="black", back_color="white").convert('RGB')
+    qr_size = 220
+    qr_img  = qr_img.resize((qr_size, qr_size), Image.NEAREST)
+
+    qr_x = (W - qr_size) // 2
+    qr_y = y_sep + 20 + 2*72 + 20
+    # White bg for QR
+    draw.rounded_rectangle([(qr_x-14, qr_y-14), (qr_x+qr_size+14, qr_y+qr_size+14)], radius=14, fill=WHITE)
+    img.paste(qr_img, (qr_x, qr_y))
+    draw.text((W//2, qr_y+qr_size+22), "Scan at entry gate", font=f_sm, fill=MUTED, anchor="mm")
+
+    # ── Short code box ──
+    sc_y  = qr_y + qr_size + 52
+    bw, bh = 360, 90
+    bx    = (W - bw) // 2
+    draw.rounded_rectangle([(bx, sc_y), (bx+bw, sc_y+bh)], radius=12, fill=(40,30,80), outline=PURPLE, width=2)
+    draw.text((W//2, sc_y+14), "MANUAL ENTRY CODE", font=f_xs,   fill=MUTED,    anchor="mm")
+    draw.text((W//2, sc_y+42), ticket.short_code or 'EVT-????',  font=f_mono,   fill=LAVENDER, anchor="mm")
+    draw.text((W//2, sc_y+74), "Type at gate if QR doesn't scan", font=f_mono_s, fill=MUTED,   anchor="mm")
+
+    # ── Status ──
+    st_y = sc_y + bh + 22
+    if ticket.checked_in:
+        draw.rounded_rectangle([(W//2-70, st_y), (W//2+70, st_y+32)], radius=16, fill=(20,60,30), outline=GREEN, width=2)
+        draw.text((W//2, st_y+16), "CHECKED IN", font=f_sm, fill=GREEN, anchor="mm")
+    else:
+        draw.rounded_rectangle([(W//2-50, st_y), (W//2+50, st_y+32)], radius=16, fill=(40,30,80), outline=PURPLE, width=2)
+        draw.text((W//2, st_y+16), "VALID", font=f_sm, fill=LAVENDER, anchor="mm")
+
+    # ── Footer ──
+    draw.rectangle([(0, H-44), (W, H)], fill=DARK)
+    draw.text((36, H-28),   "EventHub · Digital Pass", font=f_xs, fill=MUTED)
+    draw.text((W-36, H-28), "eventhub.com",            font=f_xs, fill=MUTED, anchor="ra")
+
+    # ── Serve ──
+    buf = io.BytesIO()
+    img.save(buf, format='PNG', optimize=True)
+    buf.seek(0)
+    fname = f"EventHub-Pass-{ticket.short_code or ticket.ticket_id}.png"
+    return send_file(buf, mimetype='image/png', as_attachment=True, download_name=fname)
+
+
+@app.route('/verify/<token>')
+def verify_ticket(token):
+    """Public QR scan landing page — shows ticket info."""
+    ticket = Ticket.query.filter_by(qr_token=token).first_or_404()
+    return render_template('verify_ticket.html', ticket=ticket)
+
+
+@app.route('/checkin/<token>', methods=['POST'])
+@login_required(role="organizer")
+def checkin_ticket(token):
+    """Organizer marks a ticket as checked-in. Accepts QR token or short code."""
+    from flask import jsonify
+    # Try QR token first, then short code
+    ticket = Ticket.query.filter_by(qr_token=token).first()
+    if not ticket:
+        ticket = Ticket.query.filter_by(short_code=token.upper()).first()
+    if not ticket:
+        return jsonify({'status': 'error', 'message': 'Invalid code — ticket not found'}), 404
+    if ticket.checked_in:
+        return jsonify({
+            'status': 'already',
+            'message': f'Already checked in at {ticket.checked_in_at.strftime("%I:%M %p, %b %d")}',
+            'name': ticket.order.user.name,
+            'event': ticket.event.name,
+            'type': ticket.type
+        })
+    ticket.checked_in    = True
+    ticket.checked_in_at = datetime.datetime.now()
+    db.session.commit()
+    return jsonify({
+        'status': 'success',
+        'message': 'Check-in successful! ✅',
+        'name': ticket.order.user.name,
+        'event': ticket.event.name,
+        'type': ticket.type,
+        'time': ticket.checked_in_at.strftime('%I:%M %p, %b %d')
+    })
+
+
+@app.route('/scanner')
+@login_required(role="organizer")
+def qr_scanner():
+    """Organizer QR scanner page."""
+    events = Event.query.order_by(Event.date.desc()).all()
+    return render_template('qr_scanner.html', events=events)
+
+
+# ── AI Event Planner ──
+@app.route('/ai-planner', methods=['GET', 'POST'])
+@login_required(role="organizer")
+def ai_planner():
+    plan = None
+    if request.method == 'POST':
+        event_type  = request.form.get('event_type', 'conference')
+        budget      = float(request.form.get('budget', 50000))
+        guests      = int(request.form.get('guests', 100))
+        city        = request.form.get('city', 'Delhi')
+        duration    = int(request.form.get('duration', 1))
+
+        # Smart template-based plan generation
+        venue_budget   = budget * 0.35
+        catering       = budget * 0.25
+        decor          = budget * 0.15
+        entertainment  = budget * 0.12
+        marketing      = budget * 0.08
+        misc           = budget * 0.05
+
+        venue_suggestions = {
+            'wedding':     ['Banquet Hall', 'Garden Resort', 'Heritage Hotel'],
+            'conference':  ['Convention Centre', 'Business Hotel', 'Co-working Space'],
+            'party':       ['Rooftop Lounge', 'Club Venue', 'Private Villa'],
+            'tech fest':   ['Exhibition Hall', 'University Auditorium', 'Tech Park'],
+            'concert':     ['Open-air Amphitheatre', 'Indoor Arena', 'Stadium'],
+        }.get(event_type, ['Multipurpose Hall', 'Community Centre', 'Hotel Ballroom'])
+
+        timeline = []
+        if duration >= 1:
+            timeline += [
+                {'time': '8:00 AM',  'task': 'Venue setup & decoration'},
+                {'time': '9:30 AM',  'task': 'Team briefing & final checks'},
+                {'time': '10:00 AM', 'task': 'Guest registration opens'},
+                {'time': '11:00 AM', 'task': 'Opening ceremony / Welcome'},
+            ]
+        if duration >= 1:
+            timeline += [
+                {'time': '1:00 PM',  'task': 'Lunch / Networking break'},
+                {'time': '2:30 PM',  'task': 'Main program / Activities'},
+                {'time': '5:00 PM',  'task': 'Closing remarks'},
+                {'time': '6:00 PM',  'task': 'Wrap-up & guest departure'},
+            ]
+        if duration >= 2:
+            timeline += [
+                {'time': 'Day 2 – 9:00 AM', 'task': 'Day 2 opening'},
+                {'time': 'Day 2 – 12:00 PM', 'task': 'Special sessions'},
+                {'time': 'Day 2 – 4:00 PM',  'task': 'Award ceremony / Closing'},
+            ]
+
+        plan = {
+            'event_type':  event_type.title(),
+            'budget':      budget,
+            'guests':      guests,
+            'city':        city,
+            'duration':    duration,
+            'venues':      venue_suggestions,
+            'timeline':    timeline,
+            'costs': {
+                'Venue & Logistics':  venue_budget,
+                'Catering & F&B':     catering,
+                'Decor & Setup':      decor,
+                'Entertainment':      entertainment,
+                'Marketing & Prints': marketing,
+                'Miscellaneous':      misc,
+            },
+            'tips': [
+                f'Book venue at least {4 if guests > 200 else 2} months in advance for {guests} guests.',
+                f'For {city}, expect 15-20% premium on weekends.',
+                'Get 3 vendor quotes before finalising.',
+                'Keep 10% of budget as emergency reserve.',
+                f'{"Hire a professional MC for large gatherings." if guests > 150 else "A self-hosted MC works well for intimate events."}',
+            ]
+        }
+
+    return render_template('ai_planner.html', plan=plan)
+
+
+# ── Reminders ──
+@app.route('/reminders')
+@login_required(role="attendee")
+def reminders():
+    user_id = session['user_id']
+    my_reminders = Reminder.query.filter_by(user_id=user_id).order_by(Reminder.remind_at).all()
+    # Get events the user has tickets for
+    booked_event_ids = db.session.query(Ticket.event_id).join(Order).filter(Order.user_id == user_id).distinct().all()
+    booked_events = [Event.query.get(eid[0]) for eid in booked_event_ids if Event.query.get(eid[0])]
+    return render_template('reminders.html', reminders=my_reminders, events=booked_events)
+
+@app.route('/reminders/add', methods=['POST'])
+@login_required(role="attendee")
+def add_reminder():
+    event_id   = request.form.get('event_id', type=int)
+    remind_at  = request.form.get('remind_at')
+    method     = request.form.get('method', 'email')
+    message    = request.form.get('message', '')
+    try:
+        remind_dt = datetime.datetime.strptime(remind_at, '%Y-%m-%dT%H:%M')
+        r = Reminder(user_id=session['user_id'], event_id=event_id,
+                     remind_at=remind_dt, method=method, message=message)
+        db.session.add(r)
+        db.session.commit()
+        flash('Reminder set successfully! ✅', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error setting reminder: {e}', 'danger')
+    return redirect(url_for('reminders'))
+
+@app.route('/reminders/<int:reminder_id>/delete', methods=['POST'])
+@login_required(role="attendee")
+def delete_reminder(reminder_id):
+    r = Reminder.query.get_or_404(reminder_id)
+    if r.user_id != session['user_id']:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('reminders'))
+    db.session.delete(r)
+    db.session.commit()
+    flash('Reminder deleted.', 'info')
+    return redirect(url_for('reminders'))
+
+
+# ── AI Chat API ──
+@app.route('/api/chat', methods=['POST'])
+def ai_chat():
+    from flask import jsonify
+    data = request.get_json()
+    msg  = (data.get('message', '') or '').lower().strip()
+
+    # Smart rule-based responses
+    responses = {
+        ('book', 'ticket', 'how to book'): "To book a ticket: Browse Events → click an event → choose ticket type → click Book Now → select payment method → confirm! 🎟️",
+        ('cancel', 'refund'): "You can cancel tickets from My Tickets page. Click Cancel next to any ticket. Refunds are processed within 5-7 business days. 💳",
+        ('payment', 'pay', 'upi', 'card', 'paypal'): "We accept Credit/Debit Cards, PayPal, and UPI/Net Banking (GPay, PhonePe, BHIM). All payments are 100% secure. 🔒",
+        ('organizer', 'create event', 'host'): "Sign up as an Organizer to create events! Go to Dashboard → Create New Event. You can add venues, speakers, and ticket types. 🎪",
+        ('venue', 'location', 'place'): "Venues are managed by organizers. Each event shows its venue details including address, city, and capacity. 📍",
+        ('speaker', 'speakers'): "Speakers are added by organizers per event. Check the event details page to see all speakers and their bios. 🎤",
+        ('reminder', 'notify', 'alert'): "Set reminders for your booked events from the Reminders page! Choose email or SMS and pick your preferred time. ⏰",
+        ('ai planner', 'plan event', 'planning'): "Use our AI Event Planner (organizers only) to get venue suggestions, cost breakdown, and timeline for your event! 🤖",
+        ('hello', 'hi', 'hey', 'hii'): "Hey there! 👋 I'm EventHub's AI assistant. Ask me anything about booking tickets, creating events, payments, or planning! 🎉",
+        ('help', 'support', 'assist'): "I can help with: booking tickets, cancellations, payments, creating events, venue info, reminders, and event planning! What do you need? 🙋",
+        ('price', 'cost', 'fee', 'charge'): "Ticket prices vary by event and type (General, VIP, etc.). Check the event details page for exact pricing. 💰",
+        ('thank', 'thanks', 'great', 'awesome'): "You're welcome! Happy to help. Enjoy your event! 🎊",
+    }
+
+    reply = None
+    for keywords, response in responses.items():
+        if any(k in msg for k in keywords):
+            reply = response
+            break
+
+    if not reply:
+        # Generic fallback
+        if any(c.isalpha() for c in msg):
+            reply = "I'm not sure about that specific query. Try asking about: booking tickets, payments, creating events, venues, speakers, or reminders! 😊"
+        else:
+            reply = "Please type a message and I'll help you! 😊"
+
+    return jsonify({'reply': reply})
+
+
 if __name__ == '__main__':
     with app.app_context():
         # Create database tables if they don't exist
         # In production, consider using Flask-Migrate for database migrations
         db.create_all()
     app.run(debug=True) # Set debug=False in production
+

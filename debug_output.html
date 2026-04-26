@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>My Tickets — EventHub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css?v=1777197093">
+    
+</head>
+<body>
+    <header>
+        <nav class="navbar">
+            <div class="container">
+                <a class="navbar-brand" href="/">EventHub</a>
+
+                <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation">
+                    <span></span><span></span><span></span>
+                </button>
+
+                <ul class="nav-links" id="navLinks">
+                    <li><a href="/">Home</a></li>
+                    <li><a href="/events">Browse Events</a></li>
+                    
+                        
+                        <li><span class="nav-user">Aryan</span></li>
+                        <li><a href="/logout" class="btn btn-sm btn-secondary">Logout</a></li>
+                    
+                </ul>
+            </div>
+        </nav>
+    </header>
+
+    <main class="main-content">
+        <div class="container">
+            
+                
+            
+
+            
+
+<div class="page-hero">
+    <h1>My Tickets</h1>
+    <p>All your booked event tickets in one place.</p>
+</div>
+
+
+<div class="tickets-empty">
+    <div class="tickets-empty-icon">🎫</div>
+    <h3>No tickets yet</h3>
+    <p>You haven't booked any tickets. Explore events and grab your spot!</p>
+    <a href="/events" class="btn btn-primary">Browse Events</a>
+</div>
+
+
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>✦ EventHub &nbsp;·&nbsp; &copy; 2026 All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="/static/js/script.js"></script>
+    <script>
+        // Mobile nav toggle
+        const toggle = document.getElementById('navToggle');
+        const links  = document.getElementById('navLinks');
+        if (toggle && links) {
+            toggle.addEventListener('click', () => links.classList.toggle('open'));
+        }
+    </script>
+    
+    
+</body>
+</html>

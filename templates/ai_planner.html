@@ -1,0 +1,162 @@
+{% extends "layout.html" %}
+{% block title %}AI Event Planner — EventHub{% endblock %}
+{% block content %}
+
+<div class="page-hero" style="background:linear-gradient(135deg,rgba(108,99,255,0.55),rgba(236,72,153,0.4));">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:.5rem;">
+        <span style="font-size:2rem;">🤖</span>
+        <h1 style="margin:0;">AI Event Planner</h1>
+    </div>
+    <p>Enter your event details and get a complete plan — venues, timeline, and cost breakdown instantly.</p>
+</div>
+
+<div style="display:grid;grid-template-columns:380px 1fr;gap:2rem;align-items:start;">
+
+    <!-- Input Form -->
+    <div class="card" style="position:sticky;top:80px;">
+        <div class="card-header"><h2 style="font-size:1rem;">⚙️ Event Parameters</h2></div>
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('ai_planner') }}" id="plannerForm">
+                <div class="form-group">
+                    <label>Event Type</label>
+                    <select class="form-control" name="event_type">
+                        {% set types = ['wedding','conference','party','tech fest','concert'] %}
+                        {% for t in types %}
+                        <option value="{{ t }}" {% if plan and plan.event_type.lower()==t %}selected{% endif %}>{{ t.title() }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Total Budget (₹)</label>
+                    <input type="number" class="form-control" name="budget" min="10000" step="5000"
+                           value="{{ plan.budget if plan else 100000 }}" placeholder="e.g. 100000">
+                </div>
+                <div class="form-group">
+                    <label>Expected Guests</label>
+                    <input type="number" class="form-control" name="guests" min="10" max="10000"
+                           value="{{ plan.guests if plan else 100 }}" placeholder="e.g. 200">
+                </div>
+                <div class="form-group">
+                    <label>City</label>
+                    <input type="text" class="form-control" name="city"
+                           value="{{ plan.city if plan else '' }}" placeholder="e.g. Mumbai">
+                </div>
+                <div class="form-group">
+                    <label>Duration (days)</label>
+                    <select class="form-control" name="duration">
+                        <option value="1" {% if plan and plan.duration==1 %}selected{% endif %}>1 Day</option>
+                        <option value="2" {% if plan and plan.duration==2 %}selected{% endif %}>2 Days</option>
+                        <option value="3" {% if plan and plan.duration==3 %}selected{% endif %}>3 Days</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%;" id="generateBtn">
+                    ✨ Generate Plan
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Results -->
+    <div id="planResults">
+    {% if plan %}
+    <!-- Header -->
+    <div class="card" style="background:linear-gradient(135deg,rgba(108,99,255,0.3),rgba(236,72,153,0.2));border-color:rgba(108,99,255,0.3);margin-bottom:1.5rem;">
+        <div class="card-body" style="text-align:center;padding:2rem;">
+            <div style="font-size:3rem;margin-bottom:.5rem;">🎉</div>
+            <h2 style="font-size:1.5rem;font-weight:800;color:#fff;margin-bottom:.25rem;">{{ plan.event_type }} Plan Ready!</h2>
+            <p style="color:rgba(255,255,255,0.7);">{{ plan.guests }} guests · {{ plan.city }} · {{ plan.duration }} day{{ 's' if plan.duration > 1 else '' }} · Budget ₹{{ "{:,.0f}".format(plan.budget) }}</p>
+        </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-bottom:1.5rem;">
+
+        <!-- Venue Suggestions -->
+        <div class="card">
+            <div class="card-header"><h3 style="font-size:.95rem;">📍 Venue Suggestions</h3></div>
+            <div class="card-body">
+                {% for v in plan.venues %}
+                <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+                    <div style="width:36px;height:36px;border-radius:10px;background:rgba(108,99,255,0.2);display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;">🏛</div>
+                    <div>
+                        <div style="font-weight:600;font-size:.9rem;">{{ v }}</div>
+                        <div style="font-size:.75rem;color:var(--muted);">{{ plan.city }} · Up to {{ plan.guests + 50 }} guests</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Cost Breakdown -->
+        <div class="card">
+            <div class="card-header"><h3 style="font-size:.95rem;">💰 Cost Breakdown</h3></div>
+            <div class="card-body">
+                {% set colors = ['#6C63FF','#FF6B6B','#22C55E','#F59E0B','#3B82F6','#EC4899'] %}
+                {% for label, amount in plan.costs.items() %}
+                {% set pct = ((amount / plan.budget) * 100) | int %}
+                {% set color = colors[loop.index0 % colors|length] %}
+                <div style="margin-bottom:.75rem;">
+                    <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:4px;">
+                        <span style="color:var(--text);">{{ label }}</span>
+                        <span style="font-weight:700;color:{{ color }};">₹{{ "{:,.0f}".format(amount) }}</span>
+                    </div>
+                    <div style="height:6px;background:rgba(255,255,255,0.08);border-radius:999px;overflow:hidden;">
+                        <div style="height:100%;width:{{ pct }}%;background:{{ color }};border-radius:999px;transition:width 1s ease;"></div>
+                    </div>
+                </div>
+                {% endfor %}
+                <div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:.75rem;display:flex;justify-content:space-between;font-weight:800;">
+                    <span>Total Budget</span>
+                    <span style="color:#a78bfa;">₹{{ "{:,.0f}".format(plan.budget) }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Timeline -->
+    <div class="card" style="margin-bottom:1.5rem;">
+        <div class="card-header"><h3 style="font-size:.95rem;">🗓️ Event Timeline</h3></div>
+        <div class="card-body">
+            <div style="position:relative;padding-left:2rem;">
+                <div style="position:absolute;left:8px;top:0;bottom:0;width:2px;background:linear-gradient(to bottom,#6C63FF,#EC4899);border-radius:2px;"></div>
+                {% for item in plan.timeline %}
+                <div style="position:relative;margin-bottom:1.25rem;">
+                    <div style="position:absolute;left:-1.75rem;top:4px;width:12px;height:12px;border-radius:50%;background:#6C63FF;border:2px solid #a78bfa;"></div>
+                    <div style="font-size:.75rem;color:var(--muted);margin-bottom:2px;">{{ item.time }}</div>
+                    <div style="font-weight:600;font-size:.9rem;">{{ item.task }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Pro Tips -->
+    <div class="card">
+        <div class="card-header"><h3 style="font-size:.95rem;">💡 AI Tips</h3></div>
+        <div class="card-body">
+            {% for tip in plan.tips %}
+            <div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+                <span style="color:#F59E0B;flex-shrink:0;">✦</span>
+                <span style="font-size:.875rem;color:var(--text);">{{ tip }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    {% else %}
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;text-align:center;color:var(--muted);">
+        <div style="font-size:5rem;margin-bottom:1.5rem;opacity:.6;">🤖</div>
+        <h3 style="font-size:1.2rem;font-weight:700;margin-bottom:.5rem;color:var(--text);">Ready to Plan Your Event</h3>
+        <p style="max-width:320px;">Fill in the parameters on the left and click <strong>Generate Plan</strong> to get AI-powered venue suggestions, timeline, and cost breakdown.</p>
+    </div>
+    {% endif %}
+    </div>
+</div>
+
+<script>
+document.getElementById('plannerForm').addEventListener('submit', function() {
+    var btn = document.getElementById('generateBtn');
+    btn.textContent = '⏳ Generating...';
+    btn.disabled = true;
+});
+</script>
+{% endblock %}

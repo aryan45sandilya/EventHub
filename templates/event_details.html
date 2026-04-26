@@ -1,165 +1,347 @@
 {% extends "layout.html" %}
-
-{% block title %}{{ event.name }} - EventHub{% endblock %}
-
+{% block title %}{{ event.name }} — EventHub{% endblock %}
 {% block content %}
-<div class="container">
-    <div class="card event-details-card">
-        <div class="card-header">
-            <h1>{{ event.name }}</h1>
+
+<div class="event-hero">
+    <a href="{{ url_for('list_events') }}" style="color:rgba(255,255,255,.6);font-size:.82rem;text-decoration:none;display:inline-block;margin-bottom:.75rem;">← Back to Events</a>
+    <h1>{{ event.name }}</h1>
+    <div style="display:flex;flex-wrap:wrap;gap:1.25rem;margin-top:.75rem;">
+        <span style="color:rgba(255,255,255,.8);font-size:.9rem;">📅 {{ event.date.strftime('%A, %B %d, %Y') }}</span>
+        {% if event.start_time and event.end_time %}
+        <span style="color:rgba(255,255,255,.8);font-size:.9rem;">🕐 {{ event.start_time.strftime('%I:%M %p') }} – {{ event.end_time.strftime('%I:%M %p') }}</span>
+        {% endif %}
+        <span style="color:rgba(255,255,255,.8);font-size:.9rem;">📍 {{ event.venue.name }}, {{ event.venue.city }}</span>
+    </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 320px;gap:2rem;align-items:start;">
+
+    <!-- Left: Details -->
+    <div>
+        {% if event.description %}
+        <div class="card" style="margin-bottom:1.5rem;">
+            <div class="card-header"><h2 style="font-size:1rem;">About this Event</h2></div>
+            <div class="card-body"><p style="line-height:1.75;color:var(--text);">{{ event.description }}</p></div>
         </div>
-        <div class="card-body">
-            <div class="event-info">
-                <p class="event-description">{{ event.description }}</p>
-                
-                <div class="event-meta">
-                    <div class="meta-item">
-                        <i class="fas fa-calendar"></i>
-                        <span>{{ event.date.strftime('%B %d, %Y') }}</span>
-                    </div>
-                    <div class="meta-item">
-                        <i class="fas fa-clock"></i>
-                        <span id="event-time-display">
-                            {% if event.start_time and event.end_time %}
-                                {{ event.start_time.strftime('%I:%M %p') }} - {{ event.end_time.strftime('%I:%M %p') }}
-                                <span class="duration">({{ ((event.end_time.hour * 60 + event.end_time.minute) - (event.start_time.hour * 60 + event.start_time.minute)) // 60 }} hours)</span>
-                            {% else %}
-                                Time information not available
-                            {% endif %}
-                        </span>
-                    </div>
-                    <div class="meta-item">
-                        <i class="fas fa-map-marker-alt"></i>
-                        <span>{{ event.venue.name }}, {{ event.venue.city }}</span>
-                    </div>
-                </div>
+        {% endif %}
 
-                {% if event.speakers %}
-                <div class="speakers-section">
-                    <h3>Speakers</h3>
-                    <div class="speakers-grid">
-                        {% for speaker in event.speakers %}
-                        <div class="speaker-card">
-                            <h4>{{ speaker.name }}</h4>
-                            {% if speaker.bio %}
-                            <p>{{ speaker.bio }}</p>
-                            {% endif %}
+        {% if event.speakers %}
+        <div class="card">
+            <div class="card-header"><h2 style="font-size:1rem;">🎤 Speakers</h2></div>
+            <div class="card-body">
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;">
+                    {% for speaker in event.speakers %}
+                    <div style="display:flex;align-items:flex-start;gap:12px;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem;">
+                        <div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--primary),#8B5CF6);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;flex-shrink:0;">{{ speaker.name[0] }}</div>
+                        <div>
+                            <div style="font-weight:700;font-size:.9rem;margin-bottom:2px;">{{ speaker.name }}</div>
+                            {% if speaker.bio %}<div style="font-size:.78rem;color:var(--muted);">{{ speaker.bio | truncate(80,True) }}</div>{% endif %}
                         </div>
-                        {% endfor %}
                     </div>
-                </div>
-                {% endif %}
-
-                <div class="tickets-section">
-                    <h3>Tickets</h3>
-                    {% if ticket_types %}
-                    <div class="tickets-grid">
-                        {% for ticket_type in ticket_types %}
-                        <div class="ticket-card">
-                            <h4>{{ ticket_type.type }}</h4>
-                            <p class="price">₹{{ "%.2f"|format(ticket_type.price) }}</p>
-                            <p class="quantity">Available: {{ ticket_type.quantity }}</p>
-                            {% if session.get('user_id') and session.get('user_role') == 'attendee' %}
-                            <form action="{{ url_for('book_ticket', event_id=event.event_id) }}" method="POST">
-                                <input type="hidden" name="ticket_type" value="{{ ticket_type.type }}">
-                                <div class="form-group">
-                                    <label for="quantity">Quantity</label>
-                                    <input type="number" class="form-control" name="quantity" min="1" max="{{ ticket_type.quantity }}" value="1" required>
-                                </div>
-                                <button type="submit" class="btn btn-primary">Book Now</button>
-                            </form>
-                            {% endif %}
-                        </div>
-                        {% endfor %}
-                    </div>
-                    {% else %}
-                    <p>No tickets available for this event.</p>
-                    {% endif %}
+                    {% endfor %}
                 </div>
             </div>
         </div>
+        {% endif %}
+    </div>
+
+    <!-- Right: Ticket sidebar -->
+    <div>
+        <div class="card" style="position:sticky;top:80px;">
+            <div class="card-header" style="background:linear-gradient(135deg,var(--primary),#8B5CF6);border:none;">
+                <h3 style="color:#fff;font-size:1rem;">🎟 Get Tickets</h3>
+            </div>
+            <div class="card-body">
+                {% if ticket_types %}
+                    {% for tt in ticket_types %}
+                    <div style="border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:1rem;margin-bottom:.75rem;">
+                        <div style="font-weight:700;font-size:.95rem;margin-bottom:2px;">{{ tt.type }}</div>
+                        <div style="font-size:1.3rem;font-weight:800;color:var(--primary);margin-bottom:4px;">&#8377;{{ "%.2f"|format(tt.price) }}</div>
+                        <div style="font-size:.78rem;color:{% if tt.quantity < 10 %}var(--accent){% else %}var(--muted){% endif %};margin-bottom:.75rem;">
+                            {% if tt.quantity == 0 %}Sold out{% elif tt.quantity < 10 %}Only {{ tt.quantity }} left!{% else %}{{ tt.quantity }} available{% endif %}
+                        </div>
+                        {% if session.get('user_id') and session.get('user_role') == 'attendee' and tt.quantity > 0 %}
+                        <button type="button" class="btn btn-primary" style="width:100%;"
+                            onclick="openPayment('{{ tt.type }}', {{ tt.price }}, {{ tt.quantity }}, {{ event.event_id }})">
+                            Book Now
+                        </button>
+                        {% elif tt.quantity == 0 %}
+                        <button class="btn btn-secondary" style="width:100%;" disabled>Sold Out</button>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    {% if not session.get('user_id') %}
+                    <div style="background:rgba(108,99,255,0.1);border-radius:var(--radius-sm);padding:1rem;text-align:center;font-size:.875rem;color:#c4bfff;">
+                        <a href="{{ url_for('login') }}" style="color:var(--primary);font-weight:700;">Log in</a> or
+                        <a href="{{ url_for('signup') }}" style="color:var(--primary);font-weight:700;">sign up</a> to book tickets.
+                    </div>
+                    {% endif %}
+                {% else %}
+                <div style="text-align:center;padding:2rem;color:var(--muted);">
+                    <div style="font-size:2rem;margin-bottom:.5rem;">🎫</div>
+                    <p>No tickets available yet.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><h3 style="font-size:.95rem;">📍 Venue</h3></div>
+            <div class="card-body" style="font-size:.875rem;">
+                <p style="font-weight:700;margin-bottom:4px;">{{ event.venue.name }}</p>
+                {% if event.venue.address %}<p style="color:var(--muted);">{{ event.venue.address }}</p>{% endif %}
+                <p style="color:var(--muted);">{{ event.venue.city }}{% if event.venue.state %}, {{ event.venue.state }}{% endif %}</p>
+                {% if event.venue.capacity %}<p style="margin-top:6px;font-size:.78rem;color:var(--muted);">Capacity: {{ event.venue.capacity }} seats</p>{% endif %}
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ── Payment Modal (INSIDE block content) ── -->
+<div id="paymentModal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.75);backdrop-filter:blur(6px);">
+    <div style="display:flex;align-items:center;justify-content:center;min-height:100%;padding:1rem;">
+        <div style="background:#1a1535;border:1px solid rgba(255,255,255,0.15);border-radius:20px;width:100%;max-width:460px;box-shadow:0 20px 60px rgba(0,0,0,0.6);overflow:hidden;">
+
+            <div style="background:linear-gradient(135deg,#6C63FF,#8B5CF6);padding:1.5rem 2rem;display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                    <div style="color:#fff;font-weight:800;font-size:1.1rem;">Complete Booking</div>
+                    <div style="color:rgba(255,255,255,0.7);font-size:0.82rem;margin-top:2px;">Review your order and pay</div>
+                </div>
+                <button type="button" onclick="closePayment()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:1rem;line-height:1;">✕</button>
+            </div>
+
+            <form id="paymentForm" method="POST" action="">
+                <div style="padding:1.75rem 2rem;">
+
+                    <!-- Summary -->
+                    <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:1rem 1.25rem;margin-bottom:1.5rem;">
+                        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:.75rem;">Order Summary</div>
+                        <div style="display:flex;justify-content:space-between;margin-bottom:.5rem;">
+                            <span style="font-weight:600;" id="modal-ticket-type"></span>
+                            <span style="color:var(--muted);font-size:.85rem;" id="modal-unit-price"></span>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:.75rem;">
+                            <span style="font-size:.85rem;color:var(--muted);">Quantity</span>
+                            <button type="button" onclick="changeQty(-1)" style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);color:#fff;cursor:pointer;font-size:1rem;line-height:1;">−</button>
+                            <input type="number" id="modal-qty" name="quantity" value="1" min="1"
+                                style="width:48px;text-align:center;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#fff;padding:4px;font-size:.9rem;font-weight:700;"
+                                oninput="updateTotal()">
+                            <button type="button" onclick="changeQty(1)" style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);color:#fff;cursor:pointer;font-size:1rem;line-height:1;">+</button>
+                        </div>
+                        <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:.75rem;display:flex;justify-content:space-between;align-items:center;">
+                            <span style="font-weight:700;">Total</span>
+                            <span id="modal-total" style="font-size:1.3rem;font-weight:800;color:#a78bfa;"></span>
+                        </div>
+                    </div>
+
+                    <!-- Payment Method -->
+                    <div style="margin-bottom:1.5rem;">
+                        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:.75rem;">Payment Method</div>
+                        <div style="display:flex;flex-direction:column;gap:8px;">
+                            <label id="pm-card" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1.5px solid rgba(255,255,255,0.1);border-radius:10px;cursor:pointer;">
+                                <input type="radio" name="payment_method" value="credit card" style="accent-color:#6C63FF;" onchange="highlightPM()" checked>
+                                <span style="font-size:1.2rem;">💳</span>
+                                <div><div style="font-weight:600;font-size:.9rem;color:var(--text);">Credit / Debit Card</div><div style="font-size:.75rem;color:var(--muted);">Visa, Mastercard, RuPay</div></div>
+                            </label>
+                            <label id="pm-paypal" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1.5px solid rgba(255,255,255,0.1);border-radius:10px;cursor:pointer;">
+                                <input type="radio" name="payment_method" value="paypal" style="accent-color:#6C63FF;" onchange="highlightPM()">
+                                <span style="font-size:1.2rem;">🅿️</span>
+                                <div><div style="font-weight:600;font-size:.9rem;color:var(--text);">PayPal</div><div style="font-size:.75rem;color:var(--muted);">Pay via PayPal account</div></div>
+                            </label>
+                            <label id="pm-other" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1.5px solid rgba(255,255,255,0.1);border-radius:10px;cursor:pointer;">
+                                <input type="radio" name="payment_method" value="other" style="accent-color:#6C63FF;" onchange="highlightPM()">
+                                <span style="font-size:1.2rem;">🏦</span>
+                                <div><div style="font-weight:600;font-size:.9rem;color:var(--text);">UPI / Net Banking</div><div style="font-size:.75rem;color:var(--muted);">GPay, PhonePe, BHIM</div></div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <input type="hidden" name="ticket_type" id="modal-ticket-type-input">
+                    <button type="button" id="confirmPayBtn" onclick="handlePayment()" class="btn btn-primary" style="width:100%;padding:14px;font-size:1rem;">
+                        🎟 Confirm &amp; Pay <span id="modal-pay-amount"></span>
+                    </button>
+                </div>
+            </form>
+        </div>
     </div>
 </div>
-{% endblock %}
 
-{% block head_extra %}
-<style>
-    .event-details-card {
-        max-width: 800px;
-        margin: 2rem auto;
+<!-- ── Ticket fly animation overlay ── -->
+<div id="ticketOverlay" style="display:none;position:fixed;inset:0;z-index:99999;pointer-events:none;"></div>
+
+<!-- ── Success burst overlay ── -->
+<div id="successOverlay" style="display:none;position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,0.85);backdrop-filter:blur(8px);align-items:center;justify-content:center;flex-direction:column;">
+    <div id="successCard" style="background:linear-gradient(135deg,#1a1535,#0f0c29);border:1px solid rgba(108,99,255,0.4);border-radius:24px;padding:3rem 2.5rem;text-align:center;max-width:380px;width:90%;box-shadow:0 0 60px rgba(108,99,255,0.3);transform:scale(0.5);opacity:0;transition:all 0.4s cubic-bezier(0.34,1.56,0.64,1);">
+        <div id="successEmoji" style="font-size:4rem;margin-bottom:1rem;display:block;">🎟️</div>
+        <h2 style="color:#fff;font-size:1.5rem;font-weight:800;margin-bottom:.5rem;">Booking Confirmed!</h2>
+        <p id="successMsg" style="color:rgba(255,255,255,0.7);font-size:.95rem;margin-bottom:1.5rem;"></p>
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+            <div style="background:rgba(108,99,255,0.2);border:1px solid rgba(108,99,255,0.4);border-radius:8px;padding:8px 16px;font-size:.82rem;color:#c4bfff;">✓ Payment Processed</div>
+            <div style="background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.3);border-radius:8px;padding:8px 16px;font-size:.82rem;color:#86efac;">✓ Ticket Issued</div>
+        </div>
+        <div id="successCountdown" style="margin-top:1.5rem;font-size:.8rem;color:rgba(255,255,255,0.4);">Redirecting in <span id="cdNum">3</span>s...</div>
+    </div>
+    <!-- Confetti container -->
+    <div id="confettiContainer" style="position:fixed;inset:0;pointer-events:none;overflow:hidden;"></div>
+</div>
+
+<script>
+var _price = 0, _max = 0, _eventId = 0;
+
+function openPayment(type, price, maxQty, eventId) {
+    _price = price; _max = maxQty; _eventId = eventId;
+    document.getElementById('modal-ticket-type').textContent = type;
+    document.getElementById('modal-unit-price').textContent = '\u20B9' + parseFloat(price).toFixed(2) + ' each';
+    document.getElementById('modal-ticket-type-input').value = type;
+    document.getElementById('modal-qty').max = maxQty;
+    document.getElementById('modal-qty').value = 1;
+    document.getElementById('paymentForm').action = '/book_ticket/' + eventId;
+    updateTotal();
+    highlightPM();
+    document.getElementById('paymentModal').style.display = 'block';
+    document.body.style.overflow = 'hidden';
+}
+
+function handlePayment() {
+    var btn = document.getElementById('confirmPayBtn');
+    var qty = parseInt(document.getElementById('modal-qty').value) || 1;
+    var total = (_price * qty).toFixed(2);
+    var type = document.getElementById('modal-ticket-type').textContent;
+
+    // Disable button
+    btn.disabled = true;
+    btn.textContent = 'Processing...';
+
+    // Close modal
+    document.getElementById('paymentModal').style.display = 'none';
+    document.body.style.overflow = '';
+
+    // Play animation then submit
+    playTicketAnimation(qty, type, total, function() {
+        document.getElementById('paymentForm').submit();
+    });
+}
+
+function playTicketAnimation(qty, type, total, onDone) {
+    var overlay = document.getElementById('successOverlay');
+    var card    = document.getElementById('successCard');
+    var msg     = document.getElementById('successMsg');
+    var confetti = document.getElementById('confettiContainer');
+
+    msg.textContent = qty + 'x ' + type + ' ticket' + (qty > 1 ? 's' : '') + ' · \u20B9' + total;
+
+    // Show overlay
+    overlay.style.display = 'flex';
+
+    // Spawn confetti
+    confetti.innerHTML = '';
+    var colors = ['#6C63FF','#FF6B6B','#22C55E','#F59E0B','#3B82F6','#EC4899','#a78bfa','#FDE68A'];
+    for (var i = 0; i < 80; i++) {
+        spawnConfetti(confetti, colors[Math.floor(Math.random() * colors.length)], i);
     }
 
-    .event-info {
-        padding: 1rem;
-    }
+    // Animate card in
+    setTimeout(function() {
+        card.style.transform = 'scale(1)';
+        card.style.opacity   = '1';
+    }, 50);
 
-    .event-description {
-        font-size: 1.1rem;
-        margin-bottom: 2rem;
-    }
-
-    .event-meta {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 2rem;
-        margin-bottom: 2rem;
-    }
-
-    .meta-item {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-
-    .meta-item i {
-        color: var(--primary-color);
-    }
-
-    .duration {
-        color: #666;
-        font-size: 0.9rem;
-    }
-
-    .speakers-section, .tickets-section {
-        margin-top: 2rem;
-    }
-
-    .speakers-grid, .tickets-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-        gap: 1rem;
-        margin-top: 1rem;
-    }
-
-    .speaker-card, .ticket-card {
-        background-color: var(--card-bg);
-        border: 1px solid var(--border-color);
-        border-radius: var(--border-radius);
-        padding: 1rem;
-    }
-
-    .speaker-card h4, .ticket-card h4 {
-        color: var(--primary-color);
-        margin-bottom: 0.5rem;
-    }
-
-    .price {
-        font-size: 1.2rem;
-        font-weight: bold;
-        color: var(--accent-color);
-    }
-
-    .quantity {
-        color: #666;
-        margin: 0.5rem 0;
-    }
-
-    @media (max-width: 768px) {
-        .event-meta {
-            flex-direction: column;
-            gap: 1rem;
+    // Ticket bounce emoji sequence
+    var emojis = ['🎟️','✨','🎉','🎊','🎟️'];
+    var ei = 0;
+    var emojiEl = document.getElementById('successEmoji');
+    var emojiInterval = setInterval(function() {
+        ei++;
+        if (ei < emojis.length) {
+            emojiEl.style.transform = 'scale(1.4) rotate(' + (Math.random()*20-10) + 'deg)';
+            emojiEl.textContent = emojis[ei];
+            setTimeout(function(){ emojiEl.style.transform = 'scale(1) rotate(0deg)'; }, 200);
+        } else {
+            clearInterval(emojiInterval);
         }
-    }
-</style>
-{% endblock %}
+    }, 300);
 
+    // Countdown and submit
+    var cd = 3;
+    var cdEl = document.getElementById('cdNum');
+    var cdInterval = setInterval(function() {
+        cd--;
+        cdEl.textContent = cd;
+        if (cd <= 0) {
+            clearInterval(cdInterval);
+            onDone();
+        }
+    }, 1000);
+}
+
+function spawnConfetti(container, color, index) {
+    var el = document.createElement('div');
+    var size = Math.random() * 10 + 6;
+    var shapes = ['circle','rect','triangle'];
+    var shape  = shapes[Math.floor(Math.random() * shapes.length)];
+    var startX = Math.random() * 100;
+    var delay  = Math.random() * 1.5;
+    var duration = Math.random() * 2 + 2;
+    var rotation = Math.random() * 720;
+
+    el.style.cssText = [
+        'position:absolute',
+        'top:-20px',
+        'left:' + startX + '%',
+        'width:' + size + 'px',
+        'height:' + size + 'px',
+        'background:' + color,
+        'border-radius:' + (shape === 'circle' ? '50%' : shape === 'rect' ? '2px' : '0'),
+        'animation:confettiFall ' + duration + 's ' + delay + 's ease-in forwards',
+        'opacity:0.9',
+        shape === 'triangle' ? 'clip-path:polygon(50% 0%,0% 100%,100% 100%)' : ''
+    ].join(';');
+
+    container.appendChild(el);
+}
+
+// Inject confetti keyframes once
+(function(){
+    if (document.getElementById('confettiStyle')) return;
+    var s = document.createElement('style');
+    s.id = 'confettiStyle';
+    s.textContent = '@keyframes confettiFall{0%{transform:translateY(0) rotate(0deg);opacity:.9}100%{transform:translateY(110vh) rotate(720deg);opacity:0}}';
+    document.head.appendChild(s);
+})();
+
+function closePayment() {
+    document.getElementById('paymentModal').style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+function changeQty(delta) {
+    var inp = document.getElementById('modal-qty');
+    var v = parseInt(inp.value) + delta;
+    v = Math.max(1, Math.min(_max, v));
+    inp.value = v;
+    updateTotal();
+}
+
+function updateTotal() {
+    var qty = parseInt(document.getElementById('modal-qty').value) || 1;
+    var total = (_price * qty).toFixed(2);
+    document.getElementById('modal-total').textContent = '\u20B9' + total;
+    document.getElementById('modal-pay-amount').textContent = '\u20B9' + total;
+}
+
+function highlightPM() {
+    ['pm-card','pm-paypal','pm-other'].forEach(function(id) {
+        var el = document.getElementById(id);
+        var r = el.querySelector('input[type=radio]');
+        el.style.borderColor = r.checked ? '#6C63FF' : 'rgba(255,255,255,0.1)';
+        el.style.background  = r.checked ? 'rgba(108,99,255,0.12)' : 'transparent';
+    });
+}
+
+document.getElementById('paymentModal').addEventListener('click', function(e) {
+    if (e.target === this) closePayment();
+});
+</script>
+
+{% endblock %}

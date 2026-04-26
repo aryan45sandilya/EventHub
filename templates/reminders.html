@@ -1,0 +1,118 @@
+{% extends "layout.html" %}
+{% block title %}My Reminders — EventHub{% endblock %}
+{% block content %}
+
+<div class="page-hero" style="background:linear-gradient(135deg,rgba(59,130,246,0.5),rgba(34,197,94,0.35));">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:.5rem;">
+        <span style="font-size:2rem;">⏰</span>
+        <h1 style="margin:0;">Event Reminders</h1>
+    </div>
+    <p>Set SMS or Email reminders for your upcoming events so you never miss out.</p>
+</div>
+
+<div style="display:grid;grid-template-columns:360px 1fr;gap:2rem;align-items:start;">
+
+    <!-- Add Reminder Form -->
+    <div class="card" style="position:sticky;top:80px;">
+        <div class="card-header"><h2 style="font-size:1rem;">➕ Set New Reminder</h2></div>
+        <div class="card-body">
+            {% if events %}
+            <form method="POST" action="{{ url_for('add_reminder') }}">
+                <div class="form-group">
+                    <label>Event</label>
+                    <select class="form-control" name="event_id" required>
+                        <option value="" disabled selected>Select your event</option>
+                        {% for event in events %}
+                        <option value="{{ event.event_id }}">{{ event.name }} · {{ event.date.strftime('%b %d') }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Remind Me At</label>
+                    <input type="datetime-local" class="form-control" name="remind_at" required>
+                </div>
+                <div class="form-group">
+                    <label>Notification Method</label>
+                    <div style="display:flex;gap:8px;">
+                        <label style="flex:1;display:flex;align-items:center;gap:8px;padding:10px 12px;border:1.5px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;" id="rm-email">
+                            <input type="radio" name="method" value="email" checked onchange="highlightRM()">
+                            <span>📧</span><span style="font-size:.875rem;font-weight:600;">Email</span>
+                        </label>
+                        <label style="flex:1;display:flex;align-items:center;gap:8px;padding:10px 12px;border:1.5px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;" id="rm-sms">
+                            <input type="radio" name="method" value="sms" onchange="highlightRM()">
+                            <span>📱</span><span style="font-size:.875rem;font-weight:600;">SMS</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Custom Message <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
+                    <textarea class="form-control" name="message" rows="2" placeholder="e.g. Don't forget to carry your ticket!"></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%;">⏰ Set Reminder</button>
+            </form>
+            {% else %}
+            <div style="text-align:center;padding:2rem;color:var(--muted);">
+                <div style="font-size:2.5rem;margin-bottom:.75rem;">🎫</div>
+                <p style="font-size:.875rem;">You need to book tickets first before setting reminders.</p>
+                <a href="{{ url_for('list_events') }}" class="btn btn-primary btn-sm" style="margin-top:1rem;">Browse Events</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Reminders List -->
+    <div>
+        {% if reminders %}
+        <h2 style="font-size:1.1rem;font-weight:700;margin-bottom:1rem;">Your Reminders ({{ reminders|length }})</h2>
+        {% for r in reminders %}
+        {% set is_past = r.remind_at < now %}
+        <div class="card" style="margin-bottom:1rem;border-color:{% if r.sent %}rgba(34,197,94,0.3){% elif is_past %}rgba(239,68,68,0.3){% else %}rgba(59,130,246,0.3){% endif %};">
+            <div class="card-body" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+                <div style="width:48px;height:48px;border-radius:12px;background:{% if r.sent %}rgba(34,197,94,0.2){% elif is_past %}rgba(239,68,68,0.15){% else %}rgba(59,130,246,0.2){% endif %};display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0;">
+                    {% if r.sent %}✅{% elif is_past %}⚠️{% else %}{% if r.method == 'sms' %}📱{% else %}📧{% endif %}{% endif %}
+                </div>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-weight:700;font-size:.95rem;margin-bottom:2px;">{{ r.event.name }}</div>
+                    <div style="font-size:.8rem;color:var(--muted);">
+                        {{ r.method.upper() }} · {{ r.remind_at.strftime('%b %d, %Y at %I:%M %p') }}
+                        {% if r.sent %}<span style="color:var(--success);margin-left:8px;">✓ Sent</span>
+                        {% elif is_past %}<span style="color:var(--danger);margin-left:8px;">Missed</span>
+                        {% else %}<span style="color:var(--info);margin-left:8px;">Scheduled</span>{% endif %}
+                    </div>
+                    {% if r.message %}<div style="font-size:.78rem;color:var(--muted);margin-top:4px;font-style:italic;">"{{ r.message }}"</div>{% endif %}
+                </div>
+                <div style="display:flex;align-items:center;gap:.5rem;">
+                    {% if not r.sent and not is_past %}
+                    <span style="background:rgba(59,130,246,0.15);color:#93c5fd;font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:999px;border:1px solid rgba(59,130,246,0.3);">
+                        In {{ ((r.remind_at - now).days) }}d
+                    </span>
+                    {% endif %}
+                    <form method="POST" action="{{ url_for('delete_reminder', reminder_id=r.reminder_id) }}" style="display:inline;">
+                        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete this reminder?')">✕</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div style="text-align:center;padding:4rem 2rem;color:var(--muted);">
+            <div style="font-size:4rem;margin-bottom:1rem;opacity:.6;">⏰</div>
+            <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:.5rem;color:var(--text);">No reminders yet</h3>
+            <p>Set a reminder for your upcoming events so you never miss them!</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+function highlightRM() {
+    ['rm-email','rm-sms'].forEach(function(id) {
+        var el = document.getElementById(id);
+        var r  = el.querySelector('input');
+        el.style.borderColor = r.checked ? '#3B82F6' : 'rgba(255,255,255,0.1)';
+        el.style.background  = r.checked ? 'rgba(59,130,246,0.12)' : 'transparent';
+    });
+}
+highlightRM();
+</script>
+{% endblock %}
