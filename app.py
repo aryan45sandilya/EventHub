@@ -20,6 +20,11 @@ app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
     'sqlite:///' + os.path.join(os.path.abspath(os.path.dirname(__file__)), 'eventhub.db')
 )
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_pre_ping': True,
+    'pool_recycle': 300,
+    'connect_args': {'check_same_thread': False}
+}
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.jinja_env.auto_reload = True
 app.jinja_env.bytecode_cache = None
@@ -482,18 +487,23 @@ def logout():
 def dashboard():
     """Organizer dashboard."""
     try:
-        # NUCLEAR OPTION: Close and reopen connection
-        db.session.close()
-        db.session.remove()
+        # Force new connection and fresh data
+        with db.engine.connect() as conn:
+            # Direct SQL query to bypass any caching
+            result = conn.execute(db.text("SELECT COUNT(*) FROM event"))
+            event_count = result.scalar()
+            result = conn.execute(db.text("SELECT COUNT(*) FROM venue"))
+            venue_count = result.scalar()
         
-        # Fresh queries
+        # Now fetch with ORM
         events = Event.query.order_by(Event.date.asc()).all()
         venues = Venue.query.all()
         speakers = Speaker.query.all()
         tickets = Ticket.query.all()
         orders = Order.query.order_by(Order.date.desc()).all()
 
-        app.logger.info(f"Dashboard loaded - Events: {len(events)}, Venues: {len(venues)}")
+        app.logger.info(f"Dashboard - Direct count: {event_count} events, {venue_count} venues")
+        app.logger.info(f"Dashboard - ORM count: {len(events)} events, {len(venues)} venues")
 
         return render_template('dashboard.html',
                                events=events,
