@@ -1505,7 +1505,9 @@ def ai_chat():
 if __name__ == '__main__':
     with app.app_context():
         # Create database tables if they don't exist
-        # In production, consider using Flask-Migrate for database migrations
         db.create_all()
-    app.run(debug=True) # Set debug=False in production
+    app.run(debug=True)
+
+# For Vercel
+app = app
 
