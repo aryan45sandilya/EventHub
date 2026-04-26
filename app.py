@@ -287,6 +287,14 @@ def health_check():
         venue_count = Venue.query.count()
         user_count = User.query.count()
         
+        # Get actual events
+        events = Event.query.all()
+        event_list = [{'id': e.event_id, 'name': e.name, 'date': str(e.date)} for e in events]
+        
+        # Get actual venues
+        venues = Venue.query.all()
+        venue_list = [{'id': v.venue_id, 'name': v.name, 'city': v.city} for v in venues]
+        
         return jsonify({
             'status': 'healthy',
             'database': 'connected',
@@ -295,6 +303,8 @@ def health_check():
                 'venues': venue_count,
                 'users': user_count
             },
+            'events': event_list,
+            'venues': venue_list,
             'timestamp': datetime.datetime.now().isoformat()
         }), 200
     except Exception as e:
@@ -304,6 +314,24 @@ def health_check():
             'error': str(e),
             'timestamp': datetime.datetime.now().isoformat()
         }), 500
+
+@app.route('/debug/dashboard')
+@organizer_required
+def debug_dashboard():
+    """Debug endpoint to check dashboard data."""
+    from flask import jsonify
+    try:
+        events = Event.query.order_by(Event.date.asc()).all()
+        venues = Venue.query.all()
+        
+        return jsonify({
+            'events_count': len(events),
+            'venues_count': len(venues),
+            'events': [{'id': e.event_id, 'name': e.name, 'date': str(e.date), 'venue_id': e.location_id} for e in events],
+            'venues': [{'id': v.venue_id, 'name': v.name} for v in venues]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/events')
 def list_events():
@@ -405,6 +433,11 @@ def dashboard():
         speakers = Speaker.query.all()
         tickets = Ticket.query.all()
         orders = Order.query.order_by(Order.date.desc()).all()
+
+        # Debug logging
+        app.logger.info(f"Dashboard loaded - Events: {len(events)}, Venues: {len(venues)}")
+        for event in events:
+            app.logger.info(f"  Event: {event.name} (ID: {event.event_id}, Date: {event.date})")
 
         return render_template('dashboard.html',
                                events=events,
