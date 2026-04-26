@@ -281,9 +281,20 @@ def health_check():
     try:
         # Test database connection
         db.session.execute(db.text('SELECT 1'))
+        
+        # Get counts
+        event_count = Event.query.count()
+        venue_count = Venue.query.count()
+        user_count = User.query.count()
+        
         return jsonify({
             'status': 'healthy',
             'database': 'connected',
+            'counts': {
+                'events': event_count,
+                'venues': venue_count,
+                'users': user_count
+            },
             'timestamp': datetime.datetime.now().isoformat()
         }), 200
     except Exception as e:
@@ -428,42 +439,69 @@ def dashboard():
 @organizer_required
 def create_event():
     if request.method == 'POST':
-        name = request.form.get('name')
-        description = request.form.get('description')
-        date = datetime.datetime.strptime(request.form.get('date'), '%Y-%m-%d').date()
-        start_time = request.form.get('start_time')
-        end_time = request.form.get('end_time')
-        location_id = request.form.get('location_id')
-        speaker_ids = request.form.getlist('speakers')
-
-        # Create event with the old time field for backward compatibility
-        event = Event(
-            name=name,
-            description=description,
-            date=date,
-            time=datetime.datetime.strptime(start_time, '%H:%M').time() if start_time else None,
-            location_id=location_id
-        )
-
-        # Set the new time properties
-        event.start_time = start_time
-        event.end_time = end_time
-
-        # Add selected speakers
-        for speaker_id in speaker_ids:
-            speaker = Speaker.query.get(speaker_id)
-            if speaker:
-                event.speakers.append(speaker)
-
         try:
+            name = request.form.get('name')
+            description = request.form.get('description')
+            date_str = request.form.get('date')
+            start_time = request.form.get('start_time')
+            end_time = request.form.get('end_time')
+            location_id = request.form.get('location_id')
+            speaker_ids = request.form.getlist('speakers')
+
+            # Validate required fields
+            if not name or not date_str or not location_id:
+                flash('Please fill in all required fields.', 'danger')
+                venues = Venue.query.all()
+                speakers = Speaker.query.all()
+                return render_template('event_form.html', form_title='Create Event', form_action=url_for('create_event'), venues=venues, all_speakers=speakers)
+
+            # Validate venue exists
+            venue = Venue.query.get(location_id)
+            if not venue:
+                flash('Selected venue does not exist. Please select a valid venue.', 'danger')
+                venues = Venue.query.all()
+                speakers = Speaker.query.all()
+                return render_template('event_form.html', form_title='Create Event', form_action=url_for('create_event'), venues=venues, all_speakers=speakers)
+
+            # Parse date
+            date = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+
+            # Create event with the old time field for backward compatibility
+            event = Event(
+                name=name,
+                description=description,
+                date=date,
+                time=datetime.datetime.strptime(start_time, '%H:%M').time() if start_time else None,
+                location_id=int(location_id)
+            )
+
+            # Set the new time properties
+            if start_time:
+                event.start_time = start_time
+            if end_time:
+                event.end_time = end_time
+
+            # Add selected speakers
+            for speaker_id in speaker_ids:
+                speaker = Speaker.query.get(speaker_id)
+                if speaker:
+                    event.speakers.append(speaker)
+
             db.session.add(event)
             db.session.commit()
-            flash('Event created successfully!', 'success')
+            
+            app.logger.info(f"Event created successfully: {event.name} (ID: {event.event_id})")
+            flash(f'Event "{event.name}" created successfully!', 'success')
             return redirect(url_for('dashboard'))
+            
+        except ValueError as e:
+            db.session.rollback()
+            flash(f'Invalid date or time format: {str(e)}', 'danger')
+            app.logger.error(f"ValueError creating event: {str(e)}", exc_info=True)
         except Exception as e:
             db.session.rollback()
-            flash('Error creating event. Please try again.', 'error')
-            app.logger.error(f"Error creating event: {str(e)}")
+            flash(f'Error creating event: {str(e)}', 'danger')
+            app.logger.error(f"Error creating event: {str(e)}", exc_info=True)
 
     venues = Venue.query.all()
     speakers = Speaker.query.all()
