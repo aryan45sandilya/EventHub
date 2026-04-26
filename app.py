@@ -427,6 +427,9 @@ def logout():
 def dashboard():
     """Organizer dashboard."""
     try:
+        # Force fresh query - expire any cached data
+        db.session.expire_all()
+        
         # Fetch data with minimal queries - no complex joins
         events = Event.query.order_by(Event.date.asc()).all()
         venues = Venue.query.all()
@@ -520,9 +523,14 @@ def create_event():
 
             db.session.add(event)
             db.session.commit()
+            db.session.refresh(event)  # Refresh to ensure it's in session
             
             app.logger.info(f"Event created successfully: {event.name} (ID: {event.event_id})")
             flash(f'Event "{event.name}" created successfully!', 'success')
+            
+            # Force session cleanup to ensure fresh data on redirect
+            db.session.expire_all()
+            
             return redirect(url_for('dashboard'))
             
         except ValueError as e:
@@ -615,6 +623,8 @@ def create_venue():
         try:
              db.session.add(new_venue)
              db.session.commit()
+             db.session.refresh(new_venue)  # Ensure it's in session
+             db.session.expire_all()  # Clear cache
              flash('Venue created successfully!', 'success')
              return redirect(url_for('dashboard'))
         except Exception as e:
