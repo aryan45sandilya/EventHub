@@ -2,7 +2,7 @@
 
 > A comprehensive event management platform built with Flask for seamless event organization and ticket booking.
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-eventhub--s1xx.onrender.com-brightgreen?style=for-the-badge&logo=render)](https://eventhub-s1xx.onrender.com)
+[![Live Demo][![Live Demo](https://img.shields.io/badge/Live%20Demo-aryan45sandilya.pythonanywhere.com-brightgreen?style=for-the-badge&logo=python)](https://aryan45sandilya.pythonanywhere.com)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?style=for-the-badge&logo=python)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-3.0+-black?style=for-the-badge&logo=flask)](https://flask.palletsprojects.com/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
