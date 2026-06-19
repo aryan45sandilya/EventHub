@@ -51,6 +51,15 @@ Thumbs.db
 *.log
 logs/
 
+# Dev/utility scripts
+clean_data.py
+create_admin_users.py
+schema.sql
+
+# Editor config
+.hintrc
+.gitattributes
+
 # Coverage
 .coverage
 htmlcov/
