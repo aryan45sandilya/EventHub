@@ -81,58 +81,6 @@
 ![CSS3](https://img.shields.io/badge/CSS3-1572B6?style=flat-square&logo=css3&logoColor=white)
 ![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black)
 
-## 📁 Project Structure
-
-```
-EventHub/
-├── app.py                      # Main Flask application with all routes
-├── config.py                   # Configuration settings (Dev/Prod)
-├── requirements.txt            # Python dependencies
-├── render.yaml                 # Render deployment configuration
-├── create_admin_users.py       # Admin user seeding script
-├── clean_data.py               # Database cleanup utility
-├── .env                        # Environment variables (local)
-├── .gitignore                  # Git ignore rules
-├── LICENSE                     # MIT License
-│
-├── migrations/                 # Alembic database migrations
-│   ├── versions/
-│   │   └── 50b22266f809_initial.py
-│   ├── env.py
-│   ├── alembic.ini
-│   └── script.py.mako
-│
-├── static/                     # Static assets
-│   ├── css/
-│   │   └── style.css          # Custom styles
-│   └── js/
-│       ├── script.js          # Main JavaScript
-│       └── event-validation.js # Form validation
-│
-├── templates/                  # Jinja2 HTML templates
-│   ├── layout.html            # Base template
-│   ├── index.html             # Home page
-│   ├── events.html            # Events listing
-│   ├── event_details.html     # Event details
-│   ├── event_form.html        # Create/Edit event
-│   ├── dashboard.html         # Organizer dashboard
-│   ├── my_tickets.html        # User tickets
-│   ├── digital_pass.html      # QR code pass
-│   ├── qr_scanner.html        # QR scanner
-│   ├── ai_planner.html        # AI event planner
-│   ├── reminders.html         # Event reminders
-│   ├── login.html             # Login page
-│   ├── signup.html            # Registration page
-│   └── ...                    # Other templates
-│
-├── logs/                       # Application logs (production)
-│   └── eventhub.log
-│
-└── docs/                       # Documentation
-    ├── TROUBLESHOOTING.md     # Troubleshooting guide
-    ├── DEPLOYMENT_CHECKLIST.md # Deployment steps
-    └── FIX_SUMMARY.md         # Recent fixes summary
-```
 
 
 ## 👤 Demo Accounts
